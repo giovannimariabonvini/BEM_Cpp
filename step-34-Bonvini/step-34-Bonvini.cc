@@ -134,6 +134,8 @@ namespace Step34
 
     void refine_and_resize();
 
+    void read_mesh(const std::string &mesh_file); // Implementing
+
     // The only really different function that we find here is the assembly
     // routine. We wrote this function in the most possible general way, in
     // order to allow for easy generalization to higher order methods and to
@@ -525,7 +527,7 @@ namespace Step34
   template <int dim>
   void BEMProblem<dim>::refine_and_resize()
   {
-    tria.refine_global(1);
+    tria.refine_global(0); // Increase this number for more refinement (0 = no refinement)
 
     dof_handler.distribute_dofs(fe);
 
@@ -537,6 +539,23 @@ namespace Step34
     phi.reinit(n_dofs);
     alpha.reinit(n_dofs);
   }
+
+  template <int dim>
+  void BEMProblem<dim>::read_mesh(const std::string &mesh_file)
+  {
+    std::ifstream in(mesh_file);
+    if (!in)
+    {
+        throw std::runtime_error("Error: Could not open mesh file " + mesh_file);
+    }
+
+    GridIn<dim - 1, dim> gi;
+    gi.attach_triangulation(tria);
+    gi.read_vtk(in);
+
+    // Note: No manifold is set for general meshes.
+  }
+
 
 
   // @sect4{BEMProblem::assemble_system}
@@ -589,6 +608,7 @@ namespace Step34
     // we first initialize the FEValues object and get the values of
     // $\mathbf{\tilde v}$ at the quadrature points (this vector field should
     // be constant, but it doesn't hurt to be more general):
+ 
     for (const auto &cell : dof_handler.active_cell_iterators())
       {
         fe_v.reinit(cell);
@@ -629,6 +649,7 @@ namespace Step34
                 for (unsigned int q = 0; q < n_q_points; ++q)
                   {
                     normal_wind = 0;
+                    // Scalar product between the normal to the cell and the wind
                     for (unsigned int d = 0; d < dim; ++d)
                       normal_wind += normals[q][d] * cell_wind[q](d);
 
@@ -731,6 +752,9 @@ namespace Step34
 
     system_matrix.vmult(alpha, ones);
     alpha.add(1);
+    //for (double& value : alpha) {
+    //    value = 1 - value;
+    //} 
     for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i)
       system_matrix(i, i) += alpha(i);
   }
@@ -1042,7 +1066,8 @@ namespace Step34
         return;
       }
 
-    read_domain();
+    // read_domain();
+    read_mesh("sphere_mesh.vtk");
 
     for (unsigned int cycle = 0; cycle < n_cycles; ++cycle)
       {
@@ -1073,8 +1098,8 @@ int main()
       const unsigned int mapping_degree = 1;
 
       deallog.depth_console(3);
-      BEMProblem<2> laplace_problem_2d(degree, mapping_degree);
-      laplace_problem_2d.run();
+      //BEMProblem<2> laplace_problem_2d(degree, mapping_degree);
+      //laplace_problem_2d.run();
 
       BEMProblem<3> laplace_problem_3d(degree, mapping_degree);
       laplace_problem_3d.run();
