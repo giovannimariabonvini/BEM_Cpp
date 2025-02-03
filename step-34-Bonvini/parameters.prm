@@ -6,6 +6,7 @@ set External refinement             = 5
 set Number of cycles                = 1
 set Run 2d simulation               = false
 set Run 3d simulation               = true
+set Mesh filename = sphere_mesh.vtk
 
 subsection Exact solution 2d
   # Any constant used inside the function which is not a variable name.
@@ -20,13 +21,26 @@ subsection Exact solution 2d
   set Variable names = x,y,t
 end
 
-subsection Exact solution 3d
+subsection Exact solution phi 3d
   # Any constant used inside the function which is not a variable name.
   set Function constants = 
 
   # Separate vector valued expressions by ';' as ',' is used internally by the
   # function parser.
-  set Function expression = .5*(x+y+z)
+  set Function expression = 0.5*(x+y+z)
+
+  # The name of the variables as they will be used in the function, separated
+  # by ','.
+  set Variable names = x,y,z,t
+end
+
+subsection Exact solution phi_n 3d
+  # Any constant used inside the function which is not a variable name.
+  set Function constants = 
+
+  # Separate vector valued expressions by ';' as ',' is used internally by the
+  # function parser.
+  set Function expression = -0.5*(x+y+z)
 
   # The name of the variables as they will be used in the function, separated
   # by ','.
@@ -43,32 +57,47 @@ subsection Solver
   set Log frequency = 1
   set Log history   = false
   set Log result    = true
-  set Max steps     = 100
+  set Max steps     = 1000
   set Tolerance     = 1.e-10
 end
 
-subsection Wind function 2d
+subsection Neumann function 3d
   # Any constant used inside the function which is not a variable name.
   set Function constants = 
 
   # Separate vector valued expressions by ';' as ',' is used internally by the
   # function parser.
-  set Function expression = 1; 1 # default: 0; 0
-
-  # The name of the variables as they will be used in the function, separated
-  # by ','.
-  set Variable names = x,y,t
-end
-
-subsection Wind function 3d
-  # Any constant used inside the function which is not a variable name.
-  set Function constants = 
-
-  # Separate vector valued expressions by ';' as ',' is used internally by the
-  # function parser.
-  set Function expression = 1; 1; 1
+  set Function expression = -0.5*(x+y+z)
 
   # The name of the variables as they will be used in the function, separated
   # by ','.
   set Variable names = x,y,z,t
 end
+
+subsection Dirichlet function 3d
+  # Any constant used inside the function which is not a variable name.
+  set Function constants = 
+
+  # Separate vector valued expressions by ';' as ',' is used internally by the
+  # function parser.
+  set Function expression = 0.5*(x+y+z)
+
+  # The name of the variables as they will be used in the function, separated
+  # by ','.
+  set Variable names = x,y,z,t
+end
+
+subsection Neumann region 3d
+  # Any constant used inside the function which is not a variable name.
+  set Function constants = 
+  
+  # The function expression has to be = 0 for the Neumann region and != 0 for Dirichlet region
+  # Set 1 for fully Dirichlet and 0 for fully Neumann problems
+  set Function expression = 1
+
+  # The name of the variables as they will be used in the function, separated
+  # by ','.
+  set Variable names = x,y,z,t
+end
+
+

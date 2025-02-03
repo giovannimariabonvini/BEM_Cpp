@@ -11,7 +11,7 @@ gmsh.model.occ.addSphere(0, 0, 0, radius)
 gmsh.model.occ.synchronize()
 
 # Define mesh size field
-mesh_size = 0.5
+mesh_size = 0.25
 gmsh.option.setNumber("Mesh.CharacteristicLengthFactor", mesh_size)  # Set global mesh size factor
 
 # Generate a 2D mesh with recombined quadrilaterals

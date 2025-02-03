@@ -56,6 +56,7 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <filesystem>
 
 // The last part of this preamble is to import everything in the dealii
 // namespace into the one into which everything in this program will go:
@@ -165,6 +166,12 @@ namespace Step34
     // through the parameter file.
     void solve_system();
 
+    void retrieve_solution();
+
+    void set_boundary_flags();
+
+    void construct_system_matrix_and_rhs();
+
     // Once we obtained the solution, we compute the $L^2$ error of the
     // computed potential as well as the $L^\infty$ error of the approximation
     // of the solid angle. The mesh we are using is an approximation of a
@@ -204,7 +211,8 @@ namespace Step34
     // In addition to the solution on the exterior domain, we also output the
     // solution on the domain's boundary in the output_results() function, of
     // course.
-    void compute_exterior_solution();
+
+    // void compute_exterior_solution();
 
     void output_results(const unsigned int cycle);
 
@@ -236,6 +244,7 @@ namespace Step34
     const FE_Q<dim - 1, dim>    fe;
     DoFHandler<dim - 1, dim>    dof_handler;
     MappingQ<dim - 1, dim>      mapping;
+    std::string mesh_filename;
 
     // In BEM methods, the matrix that is generated is dense. Depending on the
     // size of the problem, the final system might be solved by direct LU
@@ -246,13 +255,23 @@ namespace Step34
     FullMatrix<double> system_matrix;
     Vector<double>     system_rhs;
 
+    FullMatrix<double> H;
+    FullMatrix<double> G;
+
     // The next two variables will denote the solution $\phi$ as well as a
     // vector that will hold the values of $\alpha(\mathbf x)$ (the fraction
     // of $\Omega$ visible from a point $\mathbf x$) at the support points of
     // our shape functions.
 
     Vector<double> phi;
+    Vector<double> phi_n;
     Vector<double> alpha;
+    Vector<double> ls_solution;
+
+    std::vector<bool> assign_dirichlet;
+    std::vector<bool> assign_neumann;
+
+    // const unsigned int bc_type = 1;
 
     // The convergence table is used to output errors in the exact solution
     // and in the computed alphas.
@@ -278,8 +297,12 @@ namespace Step34
     // We also define a couple of parameters which are used in case we wanted
     // to extend the solution to the entire domain.
 
-    Functions::ParsedFunction<dim> wind;
-    Functions::ParsedFunction<dim> exact_solution;
+    Functions::ParsedFunction<dim> exact_solution_phi;
+    Functions::ParsedFunction<dim> exact_solution_phi_n;
+    Functions::ParsedFunction<dim> neumann_function;
+    Functions::ParsedFunction<dim> dirichlet_function;
+    // Since Neumann and Dirichlet regions are complementary we only need to specify one of the two
+    Functions::ParsedFunction<dim> neumann_boundary_region; 
 
     unsigned int                         singular_quadrature_order;
     std::shared_ptr<Quadrature<dim - 1>> quadrature;
@@ -315,7 +338,6 @@ namespace Step34
     : fe(fe_degree)
     , dof_handler(tria)
     , mapping(mapping_degree)
-    , wind(dim)
     , singular_quadrature_order(5)
     , n_cycles(4)
     , external_refinement(5)
@@ -332,14 +354,13 @@ namespace Step34
             << "for a " << dim << " dimensional simulation. " << std::endl;
 
     ParameterHandler prm;
-
+    
+    prm.declare_entry("Extend solution on the -2,2 box", "true", Patterns::Bool());
     prm.declare_entry("Number of cycles", "4", Patterns::Integer());
     prm.declare_entry("External refinement", "5", Patterns::Integer());
-    prm.declare_entry("Extend solution on the -2,2 box",
-                      "true",
-                      Patterns::Bool());
     prm.declare_entry("Run 2d simulation", "true", Patterns::Bool());
     prm.declare_entry("Run 3d simulation", "true", Patterns::Bool());
+    prm.declare_entry("Mesh filename", "sphere_mesh.msh", Patterns::Anything());
 
     prm.enter_subsection("Quadrature rules");
     {
@@ -379,19 +400,6 @@ namespace Step34
     // \mathbf{v}\cdot \mathbf{n} d \Gamma = 0$, for the problem to have a
     // solution. If this condition is not satisfied, then no solution can be
     // found, and the solver will not converge.
-    prm.enter_subsection("Wind function 2d");
-    {
-      Functions::ParsedFunction<2>::declare_parameters(prm, 2);
-      prm.set("Function expression", "1; 1");
-    }
-    prm.leave_subsection();
-
-    prm.enter_subsection("Wind function 3d");
-    {
-      Functions::ParsedFunction<3>::declare_parameters(prm, 3);
-      prm.set("Function expression", "1; 1; 1");
-    }
-    prm.leave_subsection();
 
     prm.enter_subsection("Exact solution 2d");
     {
@@ -400,13 +408,40 @@ namespace Step34
     }
     prm.leave_subsection();
 
-    prm.enter_subsection("Exact solution 3d");
+    prm.enter_subsection("Exact solution phi 3d");
     {
       Functions::ParsedFunction<3>::declare_parameters(prm);
       prm.set("Function expression", "x+y+z");
     }
     prm.leave_subsection();
 
+    prm.enter_subsection("Exact solution phi_n 3d");
+    {
+      Functions::ParsedFunction<3>::declare_parameters(prm);
+      prm.set("Function expression", "x+y+z");
+    }
+    prm.leave_subsection();
+
+    prm.enter_subsection("Neumann function 3d");
+    {
+      Functions::ParsedFunction<3>::declare_parameters(prm);
+      prm.set("Function expression", "2*x-1");
+    }
+    prm.leave_subsection();
+
+    prm.enter_subsection("Dirichlet function 3d");
+    {
+      Functions::ParsedFunction<3>::declare_parameters(prm);
+      prm.set("Function expression", "0.0");
+    }
+    prm.leave_subsection();
+
+   prm.enter_subsection("Neumann region 3d");
+    {
+      Functions::ParsedFunction<3>::declare_parameters(prm);
+      prm.set("Function expression", "0.0");
+    }
+    prm.leave_subsection();
 
     // In the solver section, we set all SolverControl parameters. The object
     // will then be fed to the GMRES solver in the solve_system() function.
@@ -422,6 +457,7 @@ namespace Step34
     n_cycles            = prm.get_integer("Number of cycles");
     external_refinement = prm.get_integer("External refinement");
     extend_solution     = prm.get_bool("Extend solution on the -2,2 box");
+    mesh_filename       = prm.get("Mesh filename");
 
     prm.enter_subsection("Quadrature rules");
     {
@@ -432,15 +468,33 @@ namespace Step34
     }
     prm.leave_subsection();
 
-    prm.enter_subsection("Wind function " + std::to_string(dim) + "d");
+    prm.enter_subsection("Exact solution phi " + std::to_string(dim) + "d");
     {
-      wind.parse_parameters(prm);
+      exact_solution_phi.parse_parameters(prm);
     }
     prm.leave_subsection();
 
-    prm.enter_subsection("Exact solution " + std::to_string(dim) + "d");
+    prm.enter_subsection("Exact solution phi_n " + std::to_string(dim) + "d");
     {
-      exact_solution.parse_parameters(prm);
+      exact_solution_phi_n.parse_parameters(prm);
+    }
+    prm.leave_subsection();
+
+    prm.enter_subsection("Neumann function " + std::to_string(dim) + "d");
+    {
+      neumann_function.parse_parameters(prm);
+    }
+    prm.leave_subsection();
+
+    prm.enter_subsection("Dirichlet function " + std::to_string(dim) + "d");
+    {
+      dirichlet_function.parse_parameters(prm);
+    }
+    prm.leave_subsection();
+
+    prm.enter_subsection("Neumann region " + std::to_string(dim) + "d");
+    {
+      neumann_boundary_region.parse_parameters(prm);
     }
     prm.leave_subsection();
 
@@ -534,10 +588,14 @@ namespace Step34
     const unsigned int n_dofs = dof_handler.n_dofs();
 
     system_matrix.reinit(n_dofs, n_dofs);
+    H.reinit(n_dofs, n_dofs);
+    G.reinit(n_dofs, n_dofs);
 
     system_rhs.reinit(n_dofs);
     phi.reinit(n_dofs);
+    phi_n.reinit(n_dofs);
     alpha.reinit(n_dofs);
+    ls_solution.reinit(n_dofs);
   }
 
   template <int dim>
@@ -551,10 +609,64 @@ namespace Step34
 
     GridIn<dim - 1, dim> gi;
     gi.attach_triangulation(tria);
-    gi.read_vtk(in);
 
-    // Note: No manifold is set for general meshes.
+    // Access the file extension
+    std::filesystem::path meshPath(mesh_file);
+    std::string ext = meshPath.extension().string();
+
+    if (ext == ".msh")
+      gi.read_msh(in);
+    else if (ext == ".vtk")
+      gi.read_vtk(in);
+    else
+      throw std::runtime_error("Error: Mesh file format not supported. Supported formats are .msh and .vtk");
+
+
+    // Note: No manifold is set for imported meshes.
   }
+
+
+  template <int dim>
+  void BEMProblem<dim>::set_boundary_flags()
+  {
+    const unsigned int n_dofs = dof_handler.n_dofs();
+    assign_dirichlet.resize(n_dofs, false);
+    assign_neumann.resize(n_dofs, false);
+
+    std::vector<Point<dim>> support_points(n_dofs);
+    DoFTools::map_dofs_to_support_points(mapping, dof_handler, support_points);
+
+    // Tolerance for the evaluation of the Neumann boundary region
+    // const double tol = 1e-12;
+
+    // Per ogni punto di supporto, valuta la funzione parsata:
+    // se il valore è zero (entro tol) il punto è Neumann, altrimenti Dirichlet.
+    for (unsigned int i = 0; i < n_dofs; ++i)
+    {
+      double value = neumann_boundary_region.value(support_points[i]);
+      if (value == 0) //std::fabs(value) < tol
+        assign_neumann[i] = true;
+      else
+        assign_dirichlet[i] = true;
+    }
+  
+    // Count the true values in each vector
+    unsigned int n_neumann = 0;
+    unsigned int n_dirichlet = 0;
+    for (unsigned int i = 0; i < n_dofs; ++i)
+    {
+      if (assign_neumann[i])
+        ++n_neumann;
+      if (assign_dirichlet[i])
+        ++n_dirichlet;
+    }
+
+    std::cout << "Boundary flags assigned: " 
+              << n_neumann << " Neumann nodes and " 
+              << n_dirichlet << " Dirichlet nodes" << std::endl;
+
+  }
+
 
 
 
@@ -580,9 +692,6 @@ namespace Step34
     std::vector<types::global_dof_index> local_dof_indices(
       fe.n_dofs_per_cell());
 
-    std::vector<Vector<double>> cell_wind(n_q_points, Vector<double>(dim));
-    double                      normal_wind;
-
     // Unlike in finite element methods, if we use a collocation boundary
     // element method, then in each assembly loop we only assemble the
     // information that refers to the coupling between one degree of freedom
@@ -590,7 +699,8 @@ namespace Step34
     // cell. This is done using a vector of fe.dofs_per_cell elements, which
     // will then be distributed to the matrix in the global row $i$. The
     // following object will hold this information:
-    Vector<double> local_matrix_row_i(fe.n_dofs_per_cell());
+    Vector<double> local_H_row_i(fe.n_dofs_per_cell());
+    Vector<double> local_G_row_i(fe.n_dofs_per_cell());
 
     // The index $i$ runs on the collocation points, which are the support
     // points of the $i$th basis function, while $j$ runs on inner integration
@@ -602,13 +712,34 @@ namespace Step34
     DoFTools::map_dofs_to_support_points<dim - 1, dim>(mapping,
                                                        dof_handler,
                                                        support_points);
+    // Here we assign the bc to phi and phi_n iterating through the support points
 
+    // Initialize phi and phi_n vectors
+    phi.reinit(dof_handler.n_dofs());
+    phi_n.reinit(dof_handler.n_dofs());
+
+    for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i)
+    {
+        const Point<dim> &p = support_points[i];
+        if (assign_dirichlet[i])
+          phi[i] = dirichlet_function.value(p);
+        if (assign_neumann[i])
+          phi_n[i] = neumann_function.value(p);
+    }
+    /*
+    for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i)
+    {
+      std::cout << "Point " << i << " ("<< support_points[i][0] <<"," << support_points[i][1] << "," << support_points[i][2] <<") " << " is Dirichlet: " << assign_dirichlet[i] << " and Neumann: " << assign_neumann[i] << std::endl;
+      std::cout << "phi[" << i << "] = " << phi[i] << std::endl;
+      std::cout << "phi_n[" << i << "] = " << phi_n[i] << std::endl;
+    }
+    */
 
     // After doing so, we can start the integration loop over all cells, where
     // we first initialize the FEValues object and get the values of
     // $\mathbf{\tilde v}$ at the quadrature points (this vector field should
     // be constant, but it doesn't hurt to be more general):
- 
+
     for (const auto &cell : dof_handler.active_cell_iterators())
       {
         fe_v.reinit(cell);
@@ -616,7 +747,6 @@ namespace Step34
 
         const std::vector<Point<dim>> &q_points = fe_v.get_quadrature_points();
         const std::vector<Tensor<1, dim>> &normals = fe_v.get_normal_vectors();
-        wind.vector_value_list(q_points, cell_wind);
 
         // We then form the integral over the current cell for all degrees of
         // freedom (note that this includes degrees of freedom not located on
@@ -627,7 +757,8 @@ namespace Step34
         // the case, and we store which one is the singular index:
         for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i)
           {
-            local_matrix_row_i = 0;
+            local_H_row_i = 0;
+            local_G_row_i = 0;
 
             bool         is_singular    = false;
             unsigned int singular_index = numbers::invalid_unsigned_int;
@@ -648,21 +779,17 @@ namespace Step34
               {
                 for (unsigned int q = 0; q < n_q_points; ++q)
                   {
-                    normal_wind = 0;
-                    // Scalar product between the normal to the cell and the wind
-                    for (unsigned int d = 0; d < dim; ++d)
-                      normal_wind += normals[q][d] * cell_wind[q](d);
-
                     const Tensor<1, dim> R = q_points[q] - support_points[i];
 
-                    system_rhs(i) += (LaplaceKernel::single_layer(R) *
-                                      normal_wind * fe_v.JxW(q));
-
                     for (unsigned int j = 0; j < fe.n_dofs_per_cell(); ++j)
-
-                      local_matrix_row_i(j) -=
+                     {
+                      local_H_row_i(j) -=
                         ((LaplaceKernel::double_layer(R) * normals[q]) *
                          fe_v.shape_value(j, q) * fe_v.JxW(q));
+                      local_G_row_i(j) -=
+                        ((LaplaceKernel::single_layer(R)) *
+                         fe_v.shape_value(j, q) * fe_v.JxW(q));
+                     }
                   }
               }
             else
@@ -696,33 +823,26 @@ namespace Step34
 
                 fe_v_singular.reinit(cell);
 
-                std::vector<Vector<double>> singular_cell_wind(
-                  singular_quadrature.size(), Vector<double>(dim));
-
                 const std::vector<Tensor<1, dim>> &singular_normals =
                   fe_v_singular.get_normal_vectors();
                 const std::vector<Point<dim>> &singular_q_points =
                   fe_v_singular.get_quadrature_points();
 
-                wind.vector_value_list(singular_q_points, singular_cell_wind);
 
                 for (unsigned int q = 0; q < singular_quadrature.size(); ++q)
                   {
                     const Tensor<1, dim> R =
                       singular_q_points[q] - support_points[i];
-                    double normal_wind = 0;
-                    for (unsigned int d = 0; d < dim; ++d)
-                      normal_wind +=
-                        (singular_cell_wind[q](d) * singular_normals[q][d]);
-
-                    system_rhs(i) += (LaplaceKernel::single_layer(R) *
-                                      normal_wind * fe_v_singular.JxW(q));
 
                     for (unsigned int j = 0; j < fe.n_dofs_per_cell(); ++j)
                       {
-                        local_matrix_row_i(j) -=
+                        local_H_row_i(j) -=
                           ((LaplaceKernel::double_layer(R) *
                             singular_normals[q]) *
+                           fe_v_singular.shape_value(j, q) *
+                           fe_v_singular.JxW(q));
+                        local_G_row_i(j) -= 
+                          ((LaplaceKernel::single_layer(R)) *
                            fe_v_singular.shape_value(j, q) *
                            fe_v_singular.JxW(q));
                       }
@@ -732,7 +852,10 @@ namespace Step34
             // Finally, we need to add the contributions of the current cell
             // to the global matrix.
             for (unsigned int j = 0; j < fe.n_dofs_per_cell(); ++j)
-              system_matrix(i, local_dof_indices[j]) += local_matrix_row_i(j);
+             {
+              H(i, local_dof_indices[j]) += local_H_row_i(j);
+              G(i, local_dof_indices[j]) += local_G_row_i(j);
+             }
           }
       }
 
@@ -750,13 +873,77 @@ namespace Step34
     Vector<double> ones(dof_handler.n_dofs());
     ones.add(-1.);
 
-    system_matrix.vmult(alpha, ones);
+    H.vmult(alpha, ones);
     alpha.add(1);
     //for (double& value : alpha) {
     //    value = 1 - value;
     //} 
     for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i)
-      system_matrix(i, i) += alpha(i);
+      H(i, i) += alpha(i);
+
+    // Now that we have correctly built H and G we need to assemble the final system matrix and rhs:
+    // 0 = fully Neumann, 1 = fully Dirichlet, 2 = mixed
+    /*  
+    switch (bc_type)
+    {
+      case 0:
+        system_matrix.copy_from(H);
+        G.vmult(system_rhs, phi_n); 
+        break;
+
+      case 1:
+        system_matrix.copy_from(G);
+        H.vmult(system_rhs, phi);
+        break;
+
+      case 2:
+        construct_system_matrix_and_rhs(H, G, phi, phi_n, assign_dirichlet, assign_neumann, system_matrix, system_rhs);
+        break;
+
+      default:
+        DEAL_II_NOT_IMPLEMENTED();
+    }
+    */
+  }
+
+  // This function constructs the system matrix and right hand side for the mixed boundary conditions case
+  template <int dim>
+  void BEMProblem<dim>::construct_system_matrix_and_rhs()
+  {
+    const unsigned int n_dofs = dof_handler.n_dofs();
+        
+    system_matrix.reinit(n_dofs, n_dofs);
+    system_rhs.reinit(n_dofs);
+
+    for (unsigned int i = 0; i < n_dofs; ++i) 
+    {
+      if (assign_dirichlet[i]) 
+      {
+        // phi[i] is known, phi_n[i] unknown.
+        // Eq: -G * φ_n = -H * φ.
+        // Build the i-th row: sistem_matrix(i,j) = -G(i,j)
+        for (unsigned int j = 0; j < n_dofs; ++j)
+          system_matrix(i, j) = -G(i, j);
+        
+        // Rhs: - (H*phi)_i
+        double sum = 0;
+        for (unsigned int j = 0; j < n_dofs; ++j)
+          sum += H(i, j) * phi(j);
+        system_rhs(i) = -sum;
+      }
+      else if (assign_neumann[i]) 
+      {
+        // phi_n[i] is known, phi[i] unknown
+        // Eq: H * phi = G * phi_n.
+        for (unsigned int j = 0; j < n_dofs; ++j)
+          system_matrix(i, j) = H(i, j);
+        
+        double sum = 0;
+        for (unsigned int j = 0; j < n_dofs; ++j)
+          sum += G(i, j) * phi_n(j);
+        system_rhs(i) = sum;
+      }
+    }
   }
 
 
@@ -767,7 +954,29 @@ namespace Step34
   void BEMProblem<dim>::solve_system()
   {
     SolverGMRES<Vector<double>> solver(solver_control);
-    solver.solve(system_matrix, phi, system_rhs, PreconditionIdentity());
+    solver.solve(system_matrix, ls_solution, system_rhs, PreconditionIdentity());
+  }
+  
+  // @sect4{BEMProblem::retrieve_solution}
+
+  // This function assign the solution of the linear system to the corresponding parts of phi and phi_n
+  template <int dim>
+  void BEMProblem<dim>::retrieve_solution()
+  {
+      const unsigned int n_dofs = dof_handler.n_dofs();
+
+      for (unsigned int i = 0; i < n_dofs; ++i) 
+      {
+          if (assign_dirichlet[i]) {
+              // If Dirichlet boundary is assigned here, update phi_n
+              phi_n[i] = ls_solution[i];
+          }
+          if (assign_neumann[i]) {
+              // If Neumann boundary is assigned here, update phi
+              phi[i] = ls_solution[i];
+          }
+      }
+
   }
 
 
@@ -783,11 +992,23 @@ namespace Step34
     VectorTools::integrate_difference(mapping,
                                       dof_handler,
                                       phi,
-                                      exact_solution,
+                                      exact_solution_phi,
                                       difference_per_cell,
                                       QGauss<(dim - 1)>(2 * fe.degree + 1),
                                       VectorTools::L2_norm);
-    const double L2_error =
+    const double L2_error_phi =
+      VectorTools::compute_global_error(tria,
+                                        difference_per_cell,
+                                        VectorTools::L2_norm);
+
+    VectorTools::integrate_difference(mapping,
+                                  dof_handler,
+                                  phi_n,
+                                  exact_solution_phi_n,
+                                  difference_per_cell,
+                                  QGauss<(dim - 1)>(2 * fe.degree + 1),
+                                  VectorTools::L2_norm);
+    const double L2_error_phi_n = 
       VectorTools::compute_global_error(tria,
                                         difference_per_cell,
                                         VectorTools::L2_norm);
@@ -811,7 +1032,8 @@ namespace Step34
     convergence_table.add_value("cycle", cycle);
     convergence_table.add_value("cells", n_active_cells);
     convergence_table.add_value("dofs", n_dofs);
-    convergence_table.add_value("L2(phi)", L2_error);
+    convergence_table.add_value("L2(phi)", L2_error_phi);
+    convergence_table.add_value("L2(phi_n)", L2_error_phi_n);
     convergence_table.add_value("Linfty(alpha)", alpha_error);
   }
 
@@ -930,6 +1152,8 @@ namespace Step34
   // continuous finite element grid of dimension dim. These are the usual
   // ones, and we don't comment any further on them. At the end of the
   // function, we output this exterior solution in, again, much the usual way.
+
+  /*  
   template <int dim>
   void BEMProblem<dim>::compute_exterior_solution()
   {
@@ -1006,7 +1230,7 @@ namespace Step34
 
     data_out.write_vtk(file);
   }
-
+  */
 
   // @sect4{BEMProblem::output_results}
 
@@ -1019,6 +1243,7 @@ namespace Step34
 
     dataout.attach_dof_handler(dof_handler);
     dataout.add_data_vector(phi, "phi", DataOut<dim - 1, dim>::type_dof_data);
+    dataout.add_data_vector(phi_n, "phi_n", DataOut<dim - 1, dim>::type_dof_data);
     dataout.add_data_vector(alpha,
                             "alpha",
                             DataOut<dim - 1, dim>::type_dof_data);
@@ -1035,13 +1260,17 @@ namespace Step34
     if (cycle == n_cycles - 1)
       {
         convergence_table.set_precision("L2(phi)", 3);
+        convergence_table.set_precision("L2(phi_n)", 3);
         convergence_table.set_precision("Linfty(alpha)", 3);
 
         convergence_table.set_scientific("L2(phi)", true);
+        convergence_table.set_scientific("L2(phi_n)", true);
         convergence_table.set_scientific("Linfty(alpha)", true);
 
         convergence_table.evaluate_convergence_rates(
           "L2(phi)", ConvergenceTable::reduction_rate_log2);
+        convergence_table.evaluate_convergence_rates(
+          "L2(phi_n)", ConvergenceTable::reduction_rate_log2);
         convergence_table.evaluate_convergence_rates(
           "Linfty(alpha)", ConvergenceTable::reduction_rate_log2);
         deallog << std::endl;
@@ -1067,19 +1296,22 @@ namespace Step34
       }
 
     // read_domain();
-    read_mesh("sphere_mesh.vtk");
+    read_mesh(mesh_filename);
 
     for (unsigned int cycle = 0; cycle < n_cycles; ++cycle)
       {
         refine_and_resize();
+        set_boundary_flags();
         assemble_system();
+        construct_system_matrix_and_rhs();
         solve_system();
+        retrieve_solution();
         compute_errors(cycle);
         output_results(cycle);
       }
 
-    if (extend_solution == true)
-      compute_exterior_solution();
+    //if (extend_solution == true)
+      //compute_exterior_solution();
   }
 } // namespace Step34
 
