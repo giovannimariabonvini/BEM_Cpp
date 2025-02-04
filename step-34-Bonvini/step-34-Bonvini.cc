@@ -271,6 +271,9 @@ namespace Step34
     std::vector<bool> assign_dirichlet;
     std::vector<bool> assign_neumann;
 
+    bool exterior_domain;
+    double phi_at_infinity;
+
     // const unsigned int bc_type = 1;
 
     // The convergence table is used to output errors in the exact solution
@@ -361,6 +364,8 @@ namespace Step34
     prm.declare_entry("Run 2d simulation", "true", Patterns::Bool());
     prm.declare_entry("Run 3d simulation", "true", Patterns::Bool());
     prm.declare_entry("Mesh filename", "sphere_mesh.msh", Patterns::Anything());
+    prm.declare_entry("Exterior domain", "true", Patterns::Bool());
+    prm.declare_entry("Infinity Dirichlet value", "0.0", Patterns::Double());
 
     prm.enter_subsection("Quadrature rules");
     {
@@ -458,6 +463,8 @@ namespace Step34
     external_refinement = prm.get_integer("External refinement");
     extend_solution     = prm.get_bool("Extend solution on the -2,2 box");
     mesh_filename       = prm.get("Mesh filename");
+    exterior_domain     = prm.get_bool("Exterior domain");
+    phi_at_infinity     = prm.get_double("Infinity Dirichlet value");
 
     prm.enter_subsection("Quadrature rules");
     {
@@ -581,7 +588,7 @@ namespace Step34
   template <int dim>
   void BEMProblem<dim>::refine_and_resize()
   {
-    tria.refine_global(0); // Increase this number for more refinement (0 = no refinement)
+    tria.refine_global(2); // Increase this number for more refinement (0 = no refinement)
 
     dof_handler.distribute_dofs(fe);
 
@@ -604,7 +611,7 @@ namespace Step34
     std::ifstream in(mesh_file);
     if (!in)
     {
-        throw std::runtime_error("Error: Could not open mesh file " + mesh_file);
+        throw std::runtime_error("Error: " + mesh_file + " not found.");
     }
 
     GridIn<dim - 1, dim> gi;
@@ -783,12 +790,24 @@ namespace Step34
 
                     for (unsigned int j = 0; j < fe.n_dofs_per_cell(); ++j)
                      {
-                      local_H_row_i(j) -=
-                        ((LaplaceKernel::double_layer(R) * normals[q]) *
-                         fe_v.shape_value(j, q) * fe_v.JxW(q));
-                      local_G_row_i(j) -=
-                        ((LaplaceKernel::single_layer(R)) *
-                         fe_v.shape_value(j, q) * fe_v.JxW(q));
+                      if(exterior_domain)
+                      {
+                        local_H_row_i(j) -=
+                          ((LaplaceKernel::double_layer(R) * normals[q]) *
+                          fe_v.shape_value(j, q) * fe_v.JxW(q));
+                        local_G_row_i(j) -=
+                          ((LaplaceKernel::single_layer(R)) *
+                          fe_v.shape_value(j, q) * fe_v.JxW(q));
+                      } else if (!exterior_domain)
+                      {
+                        local_H_row_i(j) +=
+                          ((LaplaceKernel::double_layer(R) * normals[q]) *
+                          fe_v.shape_value(j, q) * fe_v.JxW(q));
+                        local_G_row_i(j) +=
+                          ((LaplaceKernel::single_layer(R)) *
+                          fe_v.shape_value(j, q) * fe_v.JxW(q));
+                      }
+                      
                      }
                   }
               }
@@ -836,15 +855,29 @@ namespace Step34
 
                     for (unsigned int j = 0; j < fe.n_dofs_per_cell(); ++j)
                       {
-                        local_H_row_i(j) -=
-                          ((LaplaceKernel::double_layer(R) *
-                            singular_normals[q]) *
-                           fe_v_singular.shape_value(j, q) *
-                           fe_v_singular.JxW(q));
-                        local_G_row_i(j) -= 
-                          ((LaplaceKernel::single_layer(R)) *
-                           fe_v_singular.shape_value(j, q) *
-                           fe_v_singular.JxW(q));
+                        if(exterior_domain)
+                        {
+                          local_H_row_i(j) -=
+                            ((LaplaceKernel::double_layer(R) *
+                              singular_normals[q]) *
+                            fe_v_singular.shape_value(j, q) *
+                            fe_v_singular.JxW(q));
+                          local_G_row_i(j) -= 
+                            ((LaplaceKernel::single_layer(R)) *
+                            fe_v_singular.shape_value(j, q) *
+                            fe_v_singular.JxW(q));
+                        } else if (!exterior_domain)
+                        {
+                          local_H_row_i(j) +=
+                            ((LaplaceKernel::double_layer(R) *
+                              singular_normals[q]) *
+                            fe_v_singular.shape_value(j, q) *
+                            fe_v_singular.JxW(q));
+                          local_G_row_i(j) += 
+                            ((LaplaceKernel::single_layer(R)) *
+                            fe_v_singular.shape_value(j, q) *
+                            fe_v_singular.JxW(q));
+                        }
                       }
                   }
               }
@@ -874,12 +907,16 @@ namespace Step34
     ones.add(-1.);
 
     H.vmult(alpha, ones);
-    alpha.add(1);
+    if(exterior_domain)
+      alpha.add(1);
+    // alpha.add(1);
     //for (double& value : alpha) {
     //    value = 1 - value;
     //} 
     for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i)
+    {
       H(i, i) += alpha(i);
+    }
 
     // Now that we have correctly built H and G we need to assemble the final system matrix and rhs:
     // 0 = fully Neumann, 1 = fully Dirichlet, 2 = mixed
@@ -929,7 +966,7 @@ namespace Step34
         double sum = 0;
         for (unsigned int j = 0; j < n_dofs; ++j)
           sum += H(i, j) * phi(j);
-        system_rhs(i) = -sum;
+        system_rhs(i) = -sum - phi_at_infinity;
       }
       else if (assign_neumann[i]) 
       {
@@ -941,7 +978,7 @@ namespace Step34
         double sum = 0;
         for (unsigned int j = 0; j < n_dofs; ++j)
           sum += G(i, j) * phi_n(j);
-        system_rhs(i) = sum;
+        system_rhs(i) = sum + phi_at_infinity;
       }
     }
   }
@@ -988,29 +1025,30 @@ namespace Step34
   template <int dim>
   void BEMProblem<dim>::compute_errors(const unsigned int cycle)
   {
-    Vector<float> difference_per_cell(tria.n_active_cells());
+    Vector<float> difference_per_cell_phi(tria.n_active_cells());
     VectorTools::integrate_difference(mapping,
                                       dof_handler,
                                       phi,
                                       exact_solution_phi,
-                                      difference_per_cell,
+                                      difference_per_cell_phi,
                                       QGauss<(dim - 1)>(2 * fe.degree + 1),
                                       VectorTools::L2_norm);
     const double L2_error_phi =
       VectorTools::compute_global_error(tria,
-                                        difference_per_cell,
+                                        difference_per_cell_phi,
                                         VectorTools::L2_norm);
 
+    Vector<float> difference_per_cell_phi_n(tria.n_active_cells());
     VectorTools::integrate_difference(mapping,
                                   dof_handler,
                                   phi_n,
                                   exact_solution_phi_n,
-                                  difference_per_cell,
+                                  difference_per_cell_phi_n,
                                   QGauss<(dim - 1)>(2 * fe.degree + 1),
                                   VectorTools::L2_norm);
     const double L2_error_phi_n = 
       VectorTools::compute_global_error(tria,
-                                        difference_per_cell,
+                                        difference_per_cell_phi_n,
                                         VectorTools::L2_norm);
 
     // The error in the alpha vector can be computed directly using the

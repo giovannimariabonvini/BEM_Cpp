@@ -68,7 +68,7 @@ gmsh.model.addPhysicalGroup(2, [6], 6)  # Boundary ID 6 for the sixth face
 gmsh.model.mesh.generate(2)
 
 # Optionally, write the mesh to a file (e.g., in .msh format)
-gmsh.write("cube_mesh_quads.msh")
+gmsh.write("cube.msh")
 
 # Display the mesh in the Gmsh GUI
 gmsh.fltk.run()
