@@ -1,7 +1,7 @@
 
 """
 Run this file with the following command:
-python check_normals.py mesh_filename output_normals.vtk
+python3 check_normals.py mesh_filename output_normals.vtk
 
 Then, open the output_normals.vtk file in ParaView along with the solution.
 If the points in output_normals.vtk are all outside of the surface mesh, the normals are correct.

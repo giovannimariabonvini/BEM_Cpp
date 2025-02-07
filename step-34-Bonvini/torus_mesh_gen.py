@@ -7,8 +7,8 @@ gmsh.initialize()
 gmsh.model.add("torus")
 
 # Parameters for the torus
-r_major = 2  # Major radius (distance from the center of the hole to the center of the tube)
-r_minor = 1  # Minor radius (radius of the tube)
+r_major = 6  # Major radius (distance from the center of the hole to the center of the tube)
+r_minor = 2  # Minor radius (radius of the tube)
 
 # Create the torus geometry
 gmsh.model.occ.addTorus(0, 0, 0, r_major, r_minor)
@@ -62,7 +62,7 @@ manifold_id_array.Fill(0)  # Default ManifoldID value
 filtered_grid.GetCellData().AddArray(manifold_id_array)
 
 # Save the filtered mesh as a .vtk file for use with dealii
-filtered_vtk_path = "torus_mesh.vtk"
+filtered_vtk_path = "torus_mesh_4.vtk"
 writer = vtk.vtkUnstructuredGridWriter()
 writer.SetFileName(filtered_vtk_path)
 writer.SetInputData(filtered_grid)

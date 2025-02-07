@@ -73,7 +73,7 @@ for surface in range(1, 7):
 gmsh.model.mesh.generate(2)
 
 # Optionally, write the mesh to a file (e.g., in .msh format)
-gmsh.write("cube_uniform.msh")
+gmsh.write("cube_mesh_3.msh")
 
 # Display the mesh in the Gmsh GUI
 gmsh.fltk.run()

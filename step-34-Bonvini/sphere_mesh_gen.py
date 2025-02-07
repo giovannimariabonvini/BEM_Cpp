@@ -58,7 +58,7 @@ manifold_id_array.Fill(0)  # Default ManifoldID value
 filtered_grid.GetCellData().AddArray(manifold_id_array)
 
 # Save the filtered mesh as a .vtk file for use with dealii
-filtered_vtk_path = "sphere_mesh.vtk"
+filtered_vtk_path = "sphere_mesh_3.vtk"
 writer = vtk.vtkUnstructuredGridWriter()
 writer.SetFileName(filtered_vtk_path)
 writer.SetInputData(filtered_grid)

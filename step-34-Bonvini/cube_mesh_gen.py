@@ -7,7 +7,7 @@ gmsh.initialize()
 # Set the Gmsh model name
 gmsh.model.add("cube_surface")
 
-mesh_size = 0.25
+mesh_size = 0.0625
 
 # Define the corner points of the cube
 gmsh.model.geo.addPoint(0, 0, 0, mesh_size, 1)
@@ -68,7 +68,7 @@ gmsh.model.addPhysicalGroup(2, [6], 6)  # Boundary ID 6 for the sixth face
 gmsh.model.mesh.generate(2)
 
 # Optionally, write the mesh to a file (e.g., in .msh format)
-gmsh.write("cube.msh")
+gmsh.write("cube_mesh_4.msh")
 
 # Display the mesh in the Gmsh GUI
 gmsh.fltk.run()

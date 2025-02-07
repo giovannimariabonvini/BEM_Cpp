@@ -1,8 +1,0 @@
-cycle cells dofs   L2(phi)   Linfty(alpha) 
-    0   154  156 7.003e-02 - 1.491e-01   - 
-cycle cells dofs   L2(phi)   Linfty(alpha) 
-    0   551  553 1.872e-02 - 1.079e-01   - 
-cycle cells dofs   L2(phi)   Linfty(alpha) 
-    0  2054 2056 4.751e-03 - 4.339e-02   - 
-cycle cells dofs   L2(phi)   Linfty(alpha) 
-    0  7937 7939 1.217e-03 - 1.937e-02   - 
