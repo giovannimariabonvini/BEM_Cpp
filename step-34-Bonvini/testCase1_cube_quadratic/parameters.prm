@@ -1,0 +1,94 @@
+# Listing of Parameters
+# ---------------------
+
+set Extend solution on the -2,2 box = false
+set External refinement             = 5
+set Run 2d simulation               = false
+set Run 3d simulation               = true
+set Mesh filenames = cube_mesh_1.msh cube_mesh_2.msh cube_mesh_3.msh cube_mesh_4.msh # cube_mesh_5.msh
+set Polynomial degree = 2
+
+# when solving for the interior domain set Exterior domain to false and Infinity Dirichlet value to 0.0
+set Exterior domain = false
+set Infinity Dirichlet value = 0.0
+
+subsection Exact solution phi 3d
+  # Any constant used inside the function which is not a variable name.
+  set Function constants = 
+
+  # Separate vector valued expressions by ';' as ',' is used internally by the
+  # function parser.
+  set Function expression = x
+
+  # The name of the variables as they will be used in the function, separated
+  # by ','.
+  set Variable names = x,y,z,t
+end
+
+subsection Exact solution phi_n 3d
+  # Any constant used inside the function which is not a variable name.
+  set Function constants = 
+
+  # Separate vector valued expressions by ';' as ',' is used internally by the
+  # function parser.
+  set Function expression = if(x==0,-1,if(x==1,1,0))
+
+  # The name of the variables as they will be used in the function, separated
+  # by ','.
+  set Variable names = x,y,z,t
+end
+
+subsection Quadrature rules
+  set Quadrature order          = 4
+  set Quadrature type           = gauss
+  set Singular quadrature order = 5
+end
+
+subsection Solver
+  set Log frequency = 1
+  set Log history   = false
+  set Log result    = true
+  set Max steps     = 1000
+  set Tolerance     = 1.e-10
+end
+
+subsection Dirichlet function 3d
+  # Any constant used inside the function which is not a variable name.
+  set Function constants = 
+
+  # Separate vector valued expressions by ';' as ',' is used internally by the
+  # function parser.
+  set Function expression = x
+
+  # The name of the variables as they will be used in the function, separated
+  # by ','.
+  set Variable names = x,y,z,t
+end
+
+subsection Neumann function 3d
+  # Any constant used inside the function which is not a variable name.
+  set Function constants = 
+
+  # Separate vector valued expressions by ';' as ',' is used internally by the
+  # function parser.
+  set Function expression = if(x==0,-1,if(x==1,1,0))
+
+  # The name of the variables as they will be used in the function, separated
+  # by ','.
+  set Variable names = x,y,z,t
+end
+
+subsection Neumann region 3d
+  # Any constant used inside the function which is not a variable name.
+  set Function constants = 
+  
+  # The function expression has to be = 0 for the Neumann region and != 0 for Dirichlet region
+  # Set 1 for fully Dirichlet and 0 for fully Neumann problems or use if(condition,this,otherwise that) statement for mixed
+  set Function expression = if(x==0,0,if(x==1,0,1))
+
+  # The name of the variables as they will be used in the function, separated
+  # by ','.
+  set Variable names = x,y,z,t
+end
+
+

@@ -124,8 +124,7 @@ namespace Step34
   class BEMProblem
   {
   public:
-    BEMProblem(const unsigned int fe_degree      = 1,
-               const unsigned int mapping_degree = 1);
+    BEMProblem(const unsigned int fe_degree, const unsigned int mapping_degree = 1, const std::string &parameters_filename = "parameters.prm");
 
     void run();
 
@@ -324,6 +323,8 @@ namespace Step34
     bool run_in_this_dimension;
     bool extend_solution;
     double mesh_size;
+
+    std::string parameters_filename;
   };
 
 
@@ -343,15 +344,15 @@ namespace Step34
   // Functions::ParsedFunction::declare_parameters is static, and has no
   // knowledge of the number of components.
   template <int dim>
-  BEMProblem<dim>::BEMProblem(const unsigned int fe_degree,
-                              const unsigned int mapping_degree)
-    : fe(fe_degree)
+  BEMProblem<dim>::BEMProblem(const unsigned int fe_degree, const unsigned int mapping_degree, const std::string &parameters_filename)
+    : fe(fe_degree)  
     , dof_handler(tria)
     , mapping(mapping_degree)
     , singular_quadrature_order(5)
     , external_refinement(5)
     , run_in_this_dimension(true)
     , extend_solution(true)
+    , parameters_filename(parameters_filename)
   {}
 
 
@@ -372,6 +373,7 @@ namespace Step34
                   "sphere_mesh.msh",
                   Patterns::Anything(),
                   "Semicolon-separated list of mesh filenames.");
+    prm.declare_entry("Polynomial degree", "1", Patterns::Integer());
     prm.declare_entry("Exterior domain", "true", Patterns::Bool());
     prm.declare_entry("Infinity Dirichlet value", "0.0", Patterns::Double());
 
@@ -769,8 +771,20 @@ namespace Step34
     // $\mathbf{\tilde v}$ at the quadrature points (this vector field should
     // be constant, but it doesn't hurt to be more general):
 
+    const unsigned int n_cells   = tria.n_active_cells();
+    unsigned int       cell_idx  = 0;
+    unsigned int       next_pct  = 10;
+
     for (const auto &cell : dof_handler.active_cell_iterators())
       {
+        ++cell_idx;
+        // calcola la % corrente
+        const unsigned int pct = (cell_idx * 100) / n_cells;
+        if (pct >= next_pct)
+        {
+            std::cout << "Progress: " << next_pct << "%\n";
+            next_pct += 10;
+        }
         fe_v.reinit(cell);
         cell->get_dof_indices(local_dof_indices);
 
@@ -1109,10 +1123,28 @@ namespace Step34
       if (diff_phi_n > Linf_error_phi_n)
         Linf_error_phi_n = diff_phi_n;
     }
+
+    // Compute the Linf norm of the solution i.e. the maximum value of the absolute value of the solution
+    double Linf_norm_phi = 0.0;
+    double Linf_norm_phi_n = 0.0;
+    for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i)
+    {
+      if (std::fabs(exact_solution_phi.value(support_points[i])) > Linf_norm_phi)
+        Linf_norm_phi = std::fabs(exact_solution_phi.value(support_points[i]));
+      if (std::fabs(exact_solution_phi_n.value(support_points[i])) > Linf_norm_phi_n)
+        Linf_norm_phi_n = std::fabs(exact_solution_phi_n.value(support_points[i]));
+    }
+
+    // Normalize the Linf error with the Linf norm of the solution
+    Linf_error_phi /= Linf_norm_phi;
+    Linf_error_phi_n /= Linf_norm_phi_n;
+
     
     // WARNING ----------------------------------------------------------------
     // L2 error can be big even if nodal values are the same bacause, since no manifold is set, the mesh is not perfectly aligned with the exact solution and 
     // the quadrature integration evaluates the function phi at different points than the exact_solution_phi.
+
+    // Compute the local L2 error on each cell
     Vector<float> difference_per_cell_phi(tria.n_active_cells());
     VectorTools::integrate_difference(mapping,
                                       dof_handler,
@@ -1121,10 +1153,6 @@ namespace Step34
                                       difference_per_cell_phi,
                                       QGauss<(dim - 1)>(2 * fe.degree + 1),
                                       VectorTools::L2_norm);
-    const double L2_error_phi =
-      VectorTools::compute_global_error(tria,
-                                        difference_per_cell_phi,
-                                        VectorTools::L2_norm);
 
     Vector<float> difference_per_cell_phi_n(tria.n_active_cells());
     VectorTools::integrate_difference(mapping,
@@ -1134,10 +1162,50 @@ namespace Step34
                                   difference_per_cell_phi_n,
                                   QGauss<(dim - 1)>(2 * fe.degree + 1),
                                   VectorTools::L2_norm);
-    const double L2_error_phi_n = 
-      VectorTools::compute_global_error(tria,
+
+    // Sum up the local contributions to obtain the global error
+    double L2_error_phi = VectorTools::compute_global_error(tria,
+                                        difference_per_cell_phi,
+                                        VectorTools::L2_norm);
+    
+    double L2_error_phi_n = VectorTools::compute_global_error(tria,
                                         difference_per_cell_phi_n,
                                         VectorTools::L2_norm);
+
+    // Compute the L2 norm of the exact solution
+    Vector<double> zero_function;
+    zero_function.reinit(dof_handler.n_dofs());
+
+    Vector<float> L2_norm_phi_by_cell(tria.n_active_cells());
+    VectorTools::integrate_difference(mapping,
+                                      dof_handler,
+                                      zero_function,
+                                      exact_solution_phi,
+                                      L2_norm_phi_by_cell,
+                                      QGauss<(dim - 1)>(2 * fe.degree + 1),
+                                      VectorTools::L2_norm);
+        
+    Vector<float> L2_norm_phi_n_by_cell(tria.n_active_cells());
+    VectorTools::integrate_difference(mapping,
+                                      dof_handler,
+                                      zero_function,
+                                      exact_solution_phi_n,
+                                      L2_norm_phi_n_by_cell,
+                                      QGauss<(dim - 1)>(2 * fe.degree + 1),
+                                      VectorTools::L2_norm);
+    
+    const double L2_norm_phi = VectorTools::compute_global_error(tria,
+                                                                 L2_norm_phi_by_cell,
+                                                                 VectorTools::L2_norm);
+    
+    const double L2_norm_phi_n = VectorTools::compute_global_error(tria,
+                                                                 L2_norm_phi_n_by_cell,
+                                                                 VectorTools::L2_norm);
+
+    // Normalize the global error with the L2 norm of the exact solution
+    L2_error_phi /= L2_norm_phi;
+    L2_error_phi_n /= L2_norm_phi_n;
+                                 
 
     // The error in the alpha vector can be computed directly using the
     // Vector::linfty_norm() function, since on each node, the value should be
@@ -1150,8 +1218,7 @@ namespace Step34
     const unsigned int n_active_cells = tria.n_active_cells();
     const unsigned int n_dofs         = dof_handler.n_dofs();
 
-    deallog << "Cycle " << cycle << ':' << std::endl
-            << "   Number of active cells:       " << n_active_cells
+    deallog << "   Number of active cells:       " << n_active_cells
             << std::endl
             << "   Number of degrees of freedom: " << n_dofs 
             << std::endl
@@ -1651,7 +1718,7 @@ namespace Step34
   template <int dim>
   void BEMProblem<dim>::run()
   {
-    read_parameters("parameters_cube.prm");
+    read_parameters(parameters_filename);
 
     if (run_in_this_dimension == false)
       {
@@ -1662,7 +1729,7 @@ namespace Step34
 
     for (unsigned int cycle = 0; cycle < mesh_filenames.size(); ++cycle)
       {
-        deallog << "Cycle started, using mesh file: " << mesh_filenames[cycle] << std::endl;
+        deallog << "Using mesh file: " << mesh_filenames[cycle] << std::endl;
         read_mesh(mesh_filenames[cycle]);
         refine_and_resize();
         set_boundary_flags();
@@ -1692,14 +1759,20 @@ int main()
     {
       using namespace Step34;
 
-      const unsigned int degree         = 1;
+      const std::string parameters_filename = "parameters.prm";
+
       const unsigned int mapping_degree = 1;
+
+      ParameterHandler prm;
+      prm.declare_entry("Polynomial degree", "1", Patterns::Integer());
+      prm.parse_input(parameters_filename, "", "", /* skip_undefined= */ true);
+      const unsigned int user_fe_degree = prm.get_integer("Polynomial degree");
 
       deallog.depth_console(3);
       //BEMProblem<2> laplace_problem_2d(degree, mapping_degree);
       //laplace_problem_2d.run();
 
-      BEMProblem<3> laplace_problem_3d(degree, mapping_degree);
+      BEMProblem<3> laplace_problem_3d(user_fe_degree, mapping_degree, parameters_filename);
       laplace_problem_3d.run();
     }
   catch (std::exception &exc)

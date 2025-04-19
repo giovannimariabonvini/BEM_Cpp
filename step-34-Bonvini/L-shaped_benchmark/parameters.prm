@@ -1,0 +1,93 @@
+# Listing of Parameters
+# ---------------------
+
+set Extend solution on the -2,2 box = false
+set External refinement             = 5
+set Run 2d simulation               = false
+set Run 3d simulation               = true
+set Mesh filenames = lshape_mesh_1.msh lshape_mesh_2.msh lshape_mesh_3.msh # lshape_mesh_4.msh
+
+# when solving for the interior domain set Exterior domain to false and Infinity Dirichlet value to 0.0
+set Exterior domain = false
+set Infinity Dirichlet value = 0.0
+
+subsection Exact solution phi 3d
+  # Any constant used inside the function which is not a variable name.
+  set Function constants = 
+
+  # Separate vector valued expressions by ';' as ',' is used internally by the
+  # function parser.
+  set Function expression = exp(x)*sin(z)+exp(z)*cos(y)
+
+  # The name of the variables as they will be used in the function, separated
+  # by ','.
+  set Variable names = x,y,z,t
+end
+
+subsection Exact solution phi_n 3d
+  # Any constant used inside the function which is not a variable name.
+  set Function constants = 
+
+  # Separate vector valued expressions by ';' as ',' is used internally by the
+  # function parser.
+  set Function expression = (x == 0) ? -sin(z) : (x == 2) ? exp(2)*sin(z) : (y == 0) ? 0 : (y == 2 && z >= 2) ? -exp(z)*sin(2) : (y == 4) ? -exp(z)*sin(4) : (z == 0) ? -(exp(x) + cos(y)) : (z == 6) ? exp(x)*cos(6) + exp(6)*cos(y) : (z == 2 && y >= 2) ? exp(x)*cos(2) + exp(2)*cos(y) : 0;
+
+  # The name of the variables as they will be used in the function, separated
+  # by ','.
+  set Variable names = x,y,z,t
+end
+
+subsection Quadrature rules
+  set Quadrature order          = 4
+  set Quadrature type           = gauss
+  set Singular quadrature order = 5
+end
+
+subsection Solver
+  set Log frequency = 1
+  set Log history   = false
+  set Log result    = true
+  set Max steps     = 1000
+  set Tolerance     = 1.e-10
+end
+
+subsection Dirichlet function 3d
+  # Any constant used inside the function which is not a variable name.
+  set Function constants = 
+
+  # Separate vector valued expressions by ';' as ',' is used internally by the
+  # function parser.
+  set Function expression = exp(x)*sin(z)+exp(z)*cos(y)
+
+  # The name of the variables as they will be used in the function, separated
+  # by ','.
+  set Variable names = x,y,z,t
+end
+
+subsection Neumann function 3d
+  # Any constant used inside the function which is not a variable name.
+  set Function constants = 
+
+  # Separate vector valued expressions by ';' as ',' is used internally by the
+  # function parser.
+  set Function expression = 0
+
+  # The name of the variables as they will be used in the function, separated
+  # by ','.
+  set Variable names = x,y,z,t
+end
+
+subsection Neumann region 3d
+  # Any constant used inside the function which is not a variable name.
+  set Function constants = 
+  
+  # The function expression has to be = 0 for the Neumann region and != 0 for Dirichlet region
+  # Set 1 for fully Dirichlet and 0 for fully Neumann problems or use if(condition,this,that) statement for mixed
+  set Function expression = 1
+
+  # The name of the variables as they will be used in the function, separated
+  # by ','.
+  set Variable names = x,y,z,t
+end
+
+
