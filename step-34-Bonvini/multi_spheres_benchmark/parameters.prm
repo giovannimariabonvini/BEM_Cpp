@@ -1,0 +1,76 @@
+# --------------------------------------------------------------------
+# BEMParameterFile.prm
+# Complete parameter file for 3D BEM with mixed Dirichlet/Neumann/Robin
+# --------------------------------------------------------------------
+
+# Mesh filename(s)
+set Mesh filenames                  =  planetary_spheres_1.msh planetary_spheres_2.msh planetary_spheres_3.msh
+
+# Set kappa=0 for Laplace or kappa>0 for Yukawa equation (screened Poisson)
+set Yukawa kappa = 0
+
+# Domain type and far‐field value
+set Exterior domain                 = true
+set Infinity Dirichlet value        = 0.0
+
+# Exact solution (optional, used for error computation)
+subsection Exact solution phi 3d
+  set Variable names   = x,y,z
+  set Function constants = 
+  set Function expression = if(sqrt(x^2+y^2)<3.5,5, if( sqrt((x-5*cos(2*pi/10))^2 + (y-5*sin(2*pi/10))^2) < 1.5 || sqrt((x-5*cos(6*pi/10))^2 + (y-5*sin(6*pi/10))^2) < 1.5 || sqrt((x-5*cos(10*pi/10))^2 + (y-5*sin(10*pi/10))^2) < 1.5 || sqrt((x-5*cos(14*pi/10))^2 + (y-5*sin(14*pi/10))^2) < 1.5 || sqrt((x-5*cos(18*pi/10))^2 + (y-5*sin(18*pi/10))^2) < 1.5, -5, 5))
+end
+
+subsection Exact solution phi_n 3d
+  set Variable names   = x,y,z
+  set Function constants = 
+  set Function expression = 0
+end
+
+# Quadrature rules
+subsection Quadrature rules
+  set Quadrature type           = gauss
+  set Quadrature order          = 4
+  set Singular quadrature order = 5
+end
+
+# Linear solver parameters
+subsection Solver
+  set Log frequency = 1
+  set Log history   = false
+  set Log result    = true
+  set Max steps     = 1000
+  set Tolerance     = 1.e-10
+end
+
+# Boundary‐region flag: 0 = Neumann, 1 = Dirichlet, 2 = Robin
+subsection Boundary regions
+  set Function expression = 1
+end
+
+# Dirichlet data on Γ_D
+subsection Dirichlet function 3d
+  set Variable names   = x,y,z
+  set Function constants = 
+  set Function expression = if(sqrt(x^2+y^2)<3.5,5, if( sqrt((x-5*cos(2*pi/10))^2 + (y-5*sin(2*pi/10))^2) < 1.5 || sqrt((x-5*cos(6*pi/10))^2 + (y-5*sin(6*pi/10))^2) < 1.5 || sqrt((x-5*cos(10*pi/10))^2 + (y-5*sin(10*pi/10))^2) < 1.5 || sqrt((x-5*cos(14*pi/10))^2 + (y-5*sin(14*pi/10))^2) < 1.5 || sqrt((x-5*cos(18*pi/10))^2 + (y-5*sin(18*pi/10))^2) < 1.5, -5, 5))
+end
+
+# Neumann data on Γ_N
+subsection Neumann function 3d
+  set Variable names   = x,y,z
+  set Function constants = 
+  set Function expression = 0
+end
+
+# Robin β coefficient on Γ_R
+subsection Robin beta function 3d
+  set Variable names   = x,y,z
+  set Function constants = kappa=1.5
+  set Function expression = kappa
+end
+
+# Robin g right‐hand side on Γ_R
+subsection Robin g function 3d
+  set Variable names   = x,y,z
+  set Function constants = a=1.0, kappa=1.5
+  set Function expression = -exp(-kappa*a)/(a^2)
+end

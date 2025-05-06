@@ -74,7 +74,34 @@ namespace Step34
   // double layer potential kernels, that is $G$ and $\nabla G$. They are well
   // defined only if the vector $R = \mathbf{y}-\mathbf{x}$ is different from
   // zero.
-  namespace LaplaceKernel
+  namespace Kernel
+  {
+    inline double kappa = 0.0;
+
+    template <int dim>
+    double single_layer(const Tensor<1,dim> &R)
+    {
+      if (kappa == 0.0)
+        return (1. / (R.norm() * 4 * numbers::PI));
+      else
+        return std::exp(-kappa * R.norm()) / (4.0 * numbers::PI * R.norm());
+    }
+
+    template <int dim>
+    Tensor<1,dim> double_layer(const Tensor<1,dim> &R)
+    {
+      if (kappa == 0.0)
+      {
+        return R / (-4 * numbers::PI * R.norm_square() * R.norm());
+      }
+      else
+      {
+        return R * (1.0 + kappa * R.norm()) * std::exp(-kappa * R.norm()) / (-4 * numbers::PI * R.norm_square() * R.norm());
+      }
+    }
+  }
+
+  namespace LaplaceKernel // ONLY FOR SOLID ANGLE ALPHA COMPUTATION
   {
     template <int dim>
     double single_layer(const Tensor<1, dim> &R)
@@ -111,6 +138,8 @@ namespace Step34
   } // namespace LaplaceKernel
 
 
+
+
   // @sect3{The BEMProblem class}
 
   // The structure of a boundary element method code is very similar to the
@@ -131,7 +160,7 @@ namespace Step34
   private:
     void read_parameters(const std::string &filename);
 
-    void refine_and_resize();
+    void init_structures();
 
     void read_mesh(const std::string &mesh_file);
 
@@ -250,6 +279,8 @@ namespace Step34
     MappingQ<dim - 1, dim>      mapping;
     std::vector<std::string> mesh_filenames;
 
+    double kappa; // Yukawa parameter
+
     // In BEM methods, the matrix that is generated is dense. Depending on the
     // size of the problem, the final system might be solved by direct LU
     // decomposition, or by iterative methods. In this example we use an
@@ -261,6 +292,8 @@ namespace Step34
 
     FullMatrix<double> H;
     FullMatrix<double> G;
+
+    FullMatrix<double> H_Laplace;
 
     // The next two variables will denote the solution $\phi$ as well as a
     // vector that will hold the values of $\alpha(\mathbf x)$ (the fraction
@@ -274,6 +307,10 @@ namespace Step34
 
     std::vector<bool> assign_dirichlet;
     std::vector<bool> assign_neumann;
+    std::vector<bool> assign_robin;   // tag nodi Robin
+    Vector<double>    beta;           // coeff. β in ogni dof Robin (0 altrove)
+    Vector<double>    g;              // dato g( x_i )
+
 
     Vector<double> boundary_type;
 
@@ -308,20 +345,19 @@ namespace Step34
 
     Functions::ParsedFunction<dim> exact_solution_phi;
     Functions::ParsedFunction<dim> exact_solution_phi_n;
+
     Functions::ParsedFunction<dim> neumann_function;
     Functions::ParsedFunction<dim> dirichlet_function;
-    // Since Neumann and Dirichlet regions are complementary we only need to specify one of the two
-    Functions::ParsedFunction<dim> neumann_boundary_region; 
+    Functions::ParsedFunction<dim> robin_beta_function;
+    Functions::ParsedFunction<dim> robin_g_function;
+
+    Functions::ParsedFunction<dim> region_function; 
 
     unsigned int                         singular_quadrature_order;
     std::shared_ptr<Quadrature<dim - 1>> quadrature;
 
     SolverControl solver_control;
 
-    unsigned int external_refinement;
-
-    bool run_in_this_dimension;
-    bool extend_solution;
     double mesh_size;
 
     std::string parameters_filename;
@@ -349,215 +385,130 @@ namespace Step34
     , dof_handler(tria)
     , mapping(mapping_degree)
     , singular_quadrature_order(5)
-    , external_refinement(5)
-    , run_in_this_dimension(true)
-    , extend_solution(true)
     , parameters_filename(parameters_filename)
   {}
 
-
+  // The read_parameters() function is the one that reads the parameter file
   template <int dim>
   void BEMProblem<dim>::read_parameters(const std::string &filename)
   {
-    deallog << std::endl
-            << "Parsing parameter file " << filename << std::endl
-            << "for a " << dim << " dimensional simulation. " << std::endl;
+    Assert(dim == 3, ExcInternalError());
+    deallog << "\nParsing parameter file " << filename
+            << "\nfor a 3-dimensional simulation.\n";
 
     ParameterHandler prm;
-    
-    prm.declare_entry("Extend solution on the -2,2 box", "true", Patterns::Bool());
-    prm.declare_entry("External refinement", "5", Patterns::Integer());
-    prm.declare_entry("Run 2d simulation", "true", Patterns::Bool());
-    prm.declare_entry("Run 3d simulation", "true", Patterns::Bool());
-    prm.declare_entry("Mesh filenames",
-                  "sphere_mesh.msh",
-                  Patterns::Anything(),
-                  "Semicolon-separated list of mesh filenames.");
-    prm.declare_entry("Polynomial degree", "1", Patterns::Integer());
-    prm.declare_entry("Exterior domain", "true", Patterns::Bool());
-    prm.declare_entry("Infinity Dirichlet value", "0.0", Patterns::Double());
 
-    prm.enter_subsection("Quadrature rules");
-    {
-      prm.declare_entry(
-        "Quadrature type",
-        "gauss",
-        Patterns::Selection(
-          QuadratureSelector<(dim - 1)>::get_quadrature_names()));
-      prm.declare_entry("Quadrature order", "4", Patterns::Integer());
-      prm.declare_entry("Singular quadrature order", "5", Patterns::Integer());
-    }
-    prm.leave_subsection();
+    // 1) Global options
+    prm.declare_entry("Mesh filenames",         "cubed_sphere.msh", Patterns::Anything());
+    prm.declare_entry("Yukawa kappa", "0.0", Patterns::Double());
+    prm.declare_entry("Exterior domain",           "false", Patterns::Bool());
+    prm.declare_entry("Infinity Dirichlet value",  "0.0",   Patterns::Double());
 
-    // For both two and three dimensions, we set the default input data to be
-    // such that the solution is $x+y$ or $x+y+z$. The actually computed
-    // solution will have value zero at infinity. In this case, this coincide
-    // with the exact solution, and no additional corrections are needed, but
-    // you should be aware of the fact that we arbitrarily set $\phi_\infty$,
-    // and the exact solution we pass to the program needs to have the same
-    // value at infinity for the error to be computed correctly.
-    //
-    // The use of the Functions::ParsedFunction object is pretty straight
-    // forward. The Functions::ParsedFunction::declare_parameters function
-    // takes an additional integer argument that specifies the number of
-    // components of the given function. Its default value is one. When the
-    // corresponding Functions::ParsedFunction::parse_parameters method is
-    // called, the calling object has to have the same number of components
-    // defined here, otherwise an exception is thrown.
-    //
-    // When declaring entries, we declare both 2 and three dimensional
-    // functions. However only the dim-dimensional one is ultimately
-    // parsed. This allows us to have only one parameter file for both 2 and 3
-    // dimensional problems.
-    //
-    // Notice that from a mathematical point of view, the wind function on the
-    // boundary should satisfy the condition $\int_{\partial\Omega}
-    // \mathbf{v}\cdot \mathbf{n} d \Gamma = 0$, for the problem to have a
-    // solution. If this condition is not satisfied, then no solution can be
-    // found, and the solver will not converge.
-
-    prm.enter_subsection("Exact solution phi 2d");
-    {
-      Functions::ParsedFunction<2>::declare_parameters(prm);
-      prm.set("Function expression", "0.5*(x+y)");
-    }
-    prm.leave_subsection();
-
-    prm.enter_subsection("Exact solution phi_n 2d");
-    {
-      Functions::ParsedFunction<2>::declare_parameters(prm);
-      prm.set("Function expression", "x+y");
-    }
-    prm.leave_subsection();
-
+    // 2) Exact solution (optional)
     prm.enter_subsection("Exact solution phi 3d");
-    {
       Functions::ParsedFunction<3>::declare_parameters(prm);
-      prm.set("Function expression", "0.5*(x+y+z)");
-    }
     prm.leave_subsection();
 
     prm.enter_subsection("Exact solution phi_n 3d");
-    {
       Functions::ParsedFunction<3>::declare_parameters(prm);
-      prm.set("Function expression", "x+y+z");
-    }
     prm.leave_subsection();
 
-    prm.enter_subsection("Neumann function 2d");
-    {
-      Functions::ParsedFunction<3>::declare_parameters(prm);
-      prm.set("Function expression", "x+y");
-    }
+    // 3) Quadrature rules
+    prm.enter_subsection("Quadrature rules");
+      prm.declare_entry("Quadrature type",            "gauss",
+        Patterns::Selection(QuadratureSelector<2>::get_quadrature_names()));
+      prm.declare_entry("Quadrature order",           "4",    Patterns::Integer());
+      prm.declare_entry("Singular quadrature order",  "5",    Patterns::Integer());
     prm.leave_subsection();
 
-    prm.enter_subsection("Dirichlet function 2d");
-    {
-      Functions::ParsedFunction<3>::declare_parameters(prm);
-      prm.set("Function expression", "0.5*(x+y)");
-    }
+    // 4) Solver parameters
+    prm.enter_subsection("Solver");
+      SolverControl::declare_parameters(prm);
     prm.leave_subsection();
 
-   prm.enter_subsection("Neumann region 2d");
-    {
+    // 5) Boundary regions (0=Neumann,1=Dirichlet,2=Robin)
+    prm.enter_subsection("Boundary regions");
       Functions::ParsedFunction<3>::declare_parameters(prm);
-      prm.set("Function expression", "0.0");
-    }
+    prm.leave_subsection();
+
+    // 6) Boundary data
+    prm.enter_subsection("Dirichlet function 3d");
+      Functions::ParsedFunction<3>::declare_parameters(prm);
     prm.leave_subsection();
 
     prm.enter_subsection("Neumann function 3d");
-    {
       Functions::ParsedFunction<3>::declare_parameters(prm);
-      prm.set("Function expression", "x+y+z");
-    }
     prm.leave_subsection();
 
-    prm.enter_subsection("Dirichlet function 3d");
-    {
+    prm.enter_subsection("Robin beta function 3d");
       Functions::ParsedFunction<3>::declare_parameters(prm);
-      prm.set("Function expression", "0.5*(x+y+z)");
-    }
     prm.leave_subsection();
 
-   prm.enter_subsection("Neumann region 3d");
-    {
+    prm.enter_subsection("Robin g function 3d");
       Functions::ParsedFunction<3>::declare_parameters(prm);
-      prm.set("Function expression", "0.0");
-    }
     prm.leave_subsection();
 
-    // In the solver section, we set all SolverControl parameters. The object
-    // will then be fed to the GMRES solver in the solve_system() function.
-    prm.enter_subsection("Solver");
-    SolverControl::declare_parameters(prm);
-    prm.leave_subsection();
-
-    // After declaring all these parameters to the ParameterHandler object,
-    // let's read an input file that will give the parameters their values. We
-    // then proceed to extract these values from the ParameterHandler object:
+    // Read the file
     prm.parse_input(filename);
 
-    external_refinement = prm.get_integer("External refinement");
-    extend_solution     = prm.get_bool("Extend solution on the -2,2 box");
+    // Store global values
+    mesh_filenames              = Utilities::split_string_list(prm.get("Mesh filenames"), ' ');
+    kappa                       = prm.get_double("Yukawa kappa");
+    Kernel::kappa = kappa;
+    exterior_integration_domain = prm.get_bool("Exterior domain");
+    phi_at_infinity             = prm.get_double("Infinity Dirichlet value");
+    // external_refinement         = prm.get_integer("External refinement");
+    // run_in_this_dimension       = prm.get_bool("Run 3d simulation");
 
-    const std::string filenames_str = prm.get("Mesh filenames");
-    deallog << "Mesh files provided: " << filenames_str << std::endl;
-    mesh_filenames = dealii::Utilities::split_string_list(filenames_str, ' ');
-    
-    exterior_integration_domain     = prm.get_bool("Exterior domain");
-    phi_at_infinity     = prm.get_double("Infinity Dirichlet value");
-
+    // Re-enter quadrature rules
     prm.enter_subsection("Quadrature rules");
-    {
-      quadrature = std::shared_ptr<Quadrature<dim - 1>>(
-        new QuadratureSelector<dim - 1>(prm.get("Quadrature type"),
-                                        prm.get_integer("Quadrature order")));
+      quadrature = std::make_shared<Quadrature<2>>(
+        QuadratureSelector<2>(
+          prm.get("Quadrature type"),
+          prm.get_integer("Quadrature order")));
       singular_quadrature_order = prm.get_integer("Singular quadrature order");
-    }
     prm.leave_subsection();
 
-    prm.enter_subsection("Exact solution phi " + std::to_string(dim) + "d");
-    {
-      exact_solution_phi.parse_parameters(prm);
-    }
-    prm.leave_subsection();
-
-    prm.enter_subsection("Exact solution phi_n " + std::to_string(dim) + "d");
-    {
-      exact_solution_phi_n.parse_parameters(prm);
-    }
-    prm.leave_subsection();
-
-    prm.enter_subsection("Neumann function " + std::to_string(dim) + "d");
-    {
-      neumann_function.parse_parameters(prm);
-    }
-    prm.leave_subsection();
-
-    prm.enter_subsection("Dirichlet function " + std::to_string(dim) + "d");
-    {
-      dirichlet_function.parse_parameters(prm);
-    }
-    prm.leave_subsection();
-
-    prm.enter_subsection("Neumann region " + std::to_string(dim) + "d");
-    {
-      neumann_boundary_region.parse_parameters(prm);
-    }
-    prm.leave_subsection();
-
+    // Re-enter solver parameters
     prm.enter_subsection("Solver");
-    solver_control.parse_parameters(prm);
+      solver_control.parse_parameters(prm);
     prm.leave_subsection();
 
+    // Parse exact solutions
+    prm.enter_subsection("Exact solution phi 3d");
+      exact_solution_phi.parse_parameters(prm);
+    prm.leave_subsection();
 
-    // Finally, here's another example of how to use parameter files in
-    // dimension independent programming.  If we wanted to switch off one of
-    // the two simulations, we could do this by setting the corresponding "Run
-    // 2d simulation" or "Run 3d simulation" flag to false:
-    run_in_this_dimension =
-      prm.get_bool("Run " + std::to_string(dim) + "d simulation");
+    prm.enter_subsection("Exact solution phi_n 3d");
+      exact_solution_phi_n.parse_parameters(prm);
+    prm.leave_subsection();
+
+    // Parse boundary flag function
+    prm.enter_subsection("Boundary regions");
+      region_function.parse_parameters(prm);
+    prm.leave_subsection();
+
+    // Parse boundary data functions
+    prm.enter_subsection("Dirichlet function 3d");
+      dirichlet_function.parse_parameters(prm);
+    prm.leave_subsection();
+
+    prm.enter_subsection("Neumann function 3d");
+      neumann_function.parse_parameters(prm);
+    prm.leave_subsection();
+
+    prm.enter_subsection("Robin beta function 3d");
+      robin_beta_function.parse_parameters(prm);
+    prm.leave_subsection();
+
+    prm.enter_subsection("Robin g function 3d");
+      robin_g_function.parse_parameters(prm);
+    prm.leave_subsection();
   }
+
+
+
+
 
 
   // @sect4{BEMProblem::read_domain}
@@ -588,13 +539,13 @@ namespace Step34
   // an additional template parameter that specifies the embedding
   // space dimension.
 
-  // @sect4{BEMProblem::refine_and_resize}
+  // @sect4{BEMProblem::init_structures}
 
   // This function globally refines the mesh, distributes degrees of freedom,
   // and resizes matrices and vectors.
 
   template <int dim>
-  void BEMProblem<dim>::refine_and_resize()
+  void BEMProblem<dim>::init_structures()
   {
     tria.refine_global(0); // Increase this number for more refinement (0 = no refinement)
     dof_handler.distribute_dofs(fe);
@@ -605,11 +556,17 @@ namespace Step34
     H.reinit(n_dofs, n_dofs);
     G.reinit(n_dofs, n_dofs);
 
+    H_Laplace.reinit(n_dofs, n_dofs);
+
     system_rhs.reinit(n_dofs);
     phi.reinit(n_dofs);
     phi_n.reinit(n_dofs);
     alpha.reinit(n_dofs);
     ls_solution.reinit(n_dofs);
+
+    beta.reinit(n_dofs);
+    g.reinit(n_dofs);
+
   }
 
   template <int dim>
@@ -646,6 +603,7 @@ namespace Step34
     const unsigned int n_dofs = dof_handler.n_dofs();
     assign_dirichlet.resize(n_dofs, false);
     assign_neumann.resize(n_dofs, false);
+    assign_robin.resize(n_dofs, false);
 
     std::vector<Point<dim>> support_points(n_dofs);
     DoFTools::map_dofs_to_support_points(mapping, dof_handler, support_points);
@@ -655,33 +613,38 @@ namespace Step34
 
     // Per ogni punto di supporto, valuta la funzione parsata:
     // se il valore è zero (entro tol) il punto è Neumann, altrimenti Dirichlet.
-    for (unsigned int i = 0; i < n_dofs; ++i)
+    for (unsigned int i=0; i<n_dofs; ++i)
     {
-      double value = neumann_boundary_region.value(support_points[i]);
-      if(value == 0) //std::fabs(value) < tol
+      const Point<dim> p = support_points[i];
+      const double flag = region_function.value(p);
+
+      if (std::abs(flag) < 1e-12)                 // ---- Neumann
       {
-        assign_neumann[i] = true;
+          assign_neumann[i] = true;
+          phi_n[i]          = neumann_function.value(p);
+      }
+      else if (std::abs(flag-1.0) < 1e-12)        // ---- Dirichlet
+      {
+          assign_dirichlet[i] = true;
+          phi[i]              = dirichlet_function.value(p);
+      }
+      else if (std::abs(flag-2.0) < 1e-12)        // ---- Robin
+      {
+          assign_robin[i] = true;
+          beta[i]         = robin_beta_function.value(p);
+          g[i]            = robin_g_function.value(p);
+          // φ e q restano incognite: φ verrà risolta, q sarà derivato
       }
       else
-      {
-        assign_dirichlet[i] = true;
-      }
-
-      if (assign_neumann[i] && assign_dirichlet[i])
-      {
-        std::cout << "Error: Support point " << i << " is both Neumann and Dirichlet" << std::endl;
-      }
-      if(!assign_neumann[i] && !assign_dirichlet[i])
-      {
-        std::cout << "Error: Support point " << i << " is neither Neumann nor Dirichlet" << std::endl;
-      }
+          AssertThrow(false, ExcMessage("Region function must be 0,1,2"));
     }
   
     // Count the true values in each vector
     unsigned int n_neumann = 0;
     unsigned int n_dirichlet = 0;
+    unsigned int n_robin = 0;
     boundary_type.reinit(n_dofs);
-    boundary_type = -1;
+    boundary_type = 2;
     for (unsigned int i = 0; i < n_dofs; ++i)
     {
       if (assign_neumann[i])
@@ -693,7 +656,12 @@ namespace Step34
       {
         boundary_type[i] = 1;
         ++n_dirichlet;
-      } else
+      } else if (assign_robin[i])
+      {
+        boundary_type[i] = 2;
+        ++n_robin;
+      }
+      else
       {
         std::cerr << "Error: Boundary type not assigned to support point " << i << std::endl;
         return;
@@ -701,8 +669,9 @@ namespace Step34
     }
 
     deallog << "Boundary flags assigned: " 
-              << n_neumann << " Neumann nodes and " 
-              << n_dirichlet << " Dirichlet nodes" << std::endl;
+              << n_neumann << " Neumann, " 
+              << n_dirichlet << " Dirichlet and " 
+              << n_robin << " Robin nodes " << std::endl;
 
   }
 
@@ -741,6 +710,8 @@ namespace Step34
     Vector<double> local_H_row_i(fe.n_dofs_per_cell());
     Vector<double> local_G_row_i(fe.n_dofs_per_cell());
 
+    Vector<double> local_H_Laplace_row_i(fe.n_dofs_per_cell());
+
     // The index $i$ runs on the collocation points, which are the support
     // points of the $i$th basis function, while $j$ runs on inner integration
     // points.
@@ -753,6 +724,7 @@ namespace Step34
                                                        support_points);
     // Here we assign the bc to phi and phi_n iterating through the support points
 
+    /*
     // Initialize phi and phi_n vectors
     phi.reinit(dof_handler.n_dofs());
     phi_n.reinit(dof_handler.n_dofs());
@@ -765,7 +737,8 @@ namespace Step34
         if (assign_neumann[i])
           phi_n[i] = neumann_function.value(p);
     }
-
+    */
+   
     // After doing so, we can start the integration loop over all cells, where
     // we first initialize the FEValues object and get the values of
     // $\mathbf{\tilde v}$ at the quadrature points (this vector field should
@@ -812,6 +785,8 @@ namespace Step34
             local_H_row_i = 0;
             local_G_row_i = 0;
 
+            local_H_Laplace_row_i = 0;
+
             bool         is_singular    = false;
             unsigned int singular_index = numbers::invalid_unsigned_int;
 
@@ -831,35 +806,20 @@ namespace Step34
               {
                 for (unsigned int q = 0; q < n_q_points; ++q)
                   {
-                    const Tensor<1, dim> R = q_points[q] - support_points[i];
+                    const Tensor<1, dim> R = q_points[q] - support_points[i]; // y - x (y=integration var, x=collocation point)
 
                     for (unsigned int j = 0; j < fe.n_dofs_per_cell(); ++j)
                      {
                         local_H_row_i(j) +=
-                          ((LaplaceKernel::double_layer(R) * normals[q]) *
+                          ((Kernel::double_layer(R) * normals[q]) *
                           fe_v.shape_value(j, q) * fe_v.JxW(q));
                         local_G_row_i(j) +=
-                          ((LaplaceKernel::single_layer(R)) *
+                          ((Kernel::single_layer(R)) *
                           fe_v.shape_value(j, q) * fe_v.JxW(q));
-                      /*
-                      if(exterior_integration_domain)
-                      {
-                        local_H_row_i(j) -=
+
+                        local_H_Laplace_row_i(j) +=
                           ((LaplaceKernel::double_layer(R) * normals[q]) *
                           fe_v.shape_value(j, q) * fe_v.JxW(q));
-                        local_G_row_i(j) -=
-                          ((LaplaceKernel::single_layer(R)) *
-                          fe_v.shape_value(j, q) * fe_v.JxW(q));
-                      } else if (!exterior_integration_domain)
-                      {
-                        local_H_row_i(j) +=
-                          ((LaplaceKernel::double_layer(R) * normals[q]) *
-                          fe_v.shape_value(j, q) * fe_v.JxW(q));
-                        local_G_row_i(j) +=
-                          ((LaplaceKernel::single_layer(R)) *
-                          fe_v.shape_value(j, q) * fe_v.JxW(q));
-                      }
-                      */
                      }
                   }
               }
@@ -916,39 +876,20 @@ namespace Step34
                     for (unsigned int j = 0; j < fe.n_dofs_per_cell(); ++j)
                       {
                           local_H_row_i(j) +=
-                            ((LaplaceKernel::double_layer(R) *
+                            ((Kernel::double_layer(R) *
                               singular_normals[q]) *
                             fe_v_singular.shape_value(j, q) *
                             fe_v_singular.JxW(q));
                           local_G_row_i(j) += 
-                            ((LaplaceKernel::single_layer(R)) *
+                            ((Kernel::single_layer(R)) *
                             fe_v_singular.shape_value(j, q) *
                             fe_v_singular.JxW(q));
-                        /*
-                        if(exterior_integration_domain)
-                        {
-                          local_H_row_i(j) -=
+
+                          local_H_Laplace_row_i(j) +=
                             ((LaplaceKernel::double_layer(R) *
                               singular_normals[q]) *
                             fe_v_singular.shape_value(j, q) *
                             fe_v_singular.JxW(q));
-                          local_G_row_i(j) -= 
-                            ((LaplaceKernel::single_layer(R)) *
-                            fe_v_singular.shape_value(j, q) *
-                            fe_v_singular.JxW(q));
-                        } else if (!exterior_integration_domain)
-                        {
-                          local_H_row_i(j) +=
-                            ((LaplaceKernel::double_layer(R) *
-                              singular_normals[q]) *
-                            fe_v_singular.shape_value(j, q) *
-                            fe_v_singular.JxW(q));
-                          local_G_row_i(j) += 
-                            ((LaplaceKernel::single_layer(R)) *
-                            fe_v_singular.shape_value(j, q) *
-                            fe_v_singular.JxW(q));
-                        }
-                        */
                       }
                   }
               }
@@ -956,10 +897,12 @@ namespace Step34
             // Finally, we need to add the contributions of the current cell
             // to the global matrix.
             for (unsigned int j = 0; j < fe.n_dofs_per_cell(); ++j)
-             {
+            {
               H(i, local_dof_indices[j]) += local_H_row_i(j);
               G(i, local_dof_indices[j]) += local_G_row_i(j);
-             }
+
+              H_Laplace(i, local_dof_indices[j]) += local_H_Laplace_row_i(j);
+            }
           }
       }
 
@@ -974,10 +917,16 @@ namespace Step34
     // of the alpha angles, or solid angles (see the formula in the
     // introduction for this). The result is then added back onto the system
     // matrix object to yield the final form of the matrix:
-    Vector<double> ones(dof_handler.n_dofs());
-    ones.add(-1.);
 
-    H.vmult(alpha, ones);
+    Vector<double> ones(dof_handler.n_dofs());
+    ones.add(-1.); // -1 and not 1 since H is computed using -DoubleLayer
+    
+    H_Laplace.vmult(alpha, ones);
+
+    //H.vmult(alpha, ones);
+    //alpha.add(1);
+    // alpha *= -1.0;
+
     if(exterior_integration_domain)
       alpha.add(1);
 
@@ -985,47 +934,77 @@ namespace Step34
     {
       H(i, i) += alpha(i);
     }
+
+    //for (unsigned i=0; i<dof_handler.n_dofs(); ++i)
+    //  H(i,i) =  0.5;
+
   }
 
   // This function constructs the system matrix and right hand side for the mixed boundary conditions case
   template <int dim>
   void BEMProblem<dim>::recombine_matrices()
   {
-    const unsigned int n_dofs = dof_handler.n_dofs();
-        
-    system_matrix.reinit(n_dofs, n_dofs);
-    system_rhs.reinit(n_dofs);
+    const unsigned int N = dof_handler.n_dofs();
 
-    for (unsigned int i = 0; i < n_dofs; ++i) 
+    system_matrix.reinit(N, N);
+    system_rhs.reinit(N);
+
+    for (unsigned int i = 0; i < N; ++i)
     {
-      if (assign_dirichlet[i]) 
+      /* ---------- 1. RIGA DI TIPO DIRICHLET ------------------------ */
+      if (assign_dirichlet[i])
       {
-        // phi[i] is known, phi_n[i] unknown.
-        // Eq: G * phi_n = H * phi + phi_inf.
-        // Build the i-th row: sistem_matrix(i,j) = G(i,j)
-        for (unsigned int j = 0; j < n_dofs; ++j)
+        for (unsigned int j = 0; j < N; ++j)
           system_matrix(i, j) = G(i, j);
-        
-        // Rhs: (H*phi)_i + phi_inf
-        double sum = 0;
-        for (unsigned int j = 0; j < n_dofs; ++j)
-          sum += H(i, j) * phi(j);
-        system_rhs(i) = sum + phi_at_infinity;
+
+        double rhs = 0.0;
+
+        for (unsigned int j = 0; j < N; ++j)
+          if (assign_dirichlet[j])                    // φ_j noto
+            rhs += H(i, j) * phi(j);
+
+        for (unsigned int j = 0; j < N; ++j)
+          if (assign_robin[j])                        // q = g - βφ, parte g nota
+            rhs -= G(i, j) * g(j);
+
+        system_rhs(i) = rhs + phi_at_infinity;
       }
-      else if (assign_neumann[i]) 
+      /* ---------- 2. RIGA DI TIPO NEUMANN -------------------------- */
+      else if (assign_neumann[i])
       {
-        // phi_n[i] is known, phi[i] unknown
-        // Eq: H * phi = G * phi_n - phi_inf.
-        for (unsigned int j = 0; j < n_dofs; ++j)
+        for (unsigned int j = 0; j < N; ++j)
           system_matrix(i, j) = H(i, j);
-        
-        double sum = 0;
-        for (unsigned int j = 0; j < n_dofs; ++j)
-          sum += G(i, j) * phi_n(j);
-        system_rhs(i) = sum - phi_at_infinity;
+
+        double rhs = 0.0;
+
+        for (unsigned int j = 0; j < N; ++j)
+          if (assign_neumann[j])                      // q_j noto
+            rhs += G(i, j) * phi_n(j);
+
+        for (unsigned int j = 0; j < N; ++j)
+          if (assign_robin[j])                        // β_j * φ_j incognita ⇒ g noto
+            rhs += beta(j) * H(i, j) * g(j);
+
+        system_rhs(i) = rhs - phi_at_infinity;
       }
+      /* ---------- 3. RIGA DI TIPO ROBIN ---------------------------- */
+      else if (assign_robin[i])
+      {
+        for (unsigned int j = 0; j < N; ++j)
+          system_matrix(i,j) = H(i,j) - beta(i) * G(i,j);
+
+        double rhs = 0.0;
+        for (unsigned int j = 0; j < N; ++j)
+          if (assign_robin[j])      // g is known on all robin nodes
+            rhs -= G(i,j) * g(j);
+
+        system_rhs(i) = rhs;
+      }
+      else
+        AssertThrow(false, ExcMessage("Boundary flag non impostato"));
     }
   }
+
 
 
   // @sect4{BEMProblem::solve_system}
@@ -1046,15 +1025,16 @@ namespace Step34
   {
       const unsigned int n_dofs = dof_handler.n_dofs();
 
-      for (unsigned int i = 0; i < n_dofs; ++i) 
+      for (unsigned int i=0, idx=0; i<n_dofs; ++i)
       {
-          if (assign_dirichlet[i]) {
-              // If Dirichlet boundary is assigned here, update phi_n
-              phi_n[i] = ls_solution[i];
-          }
-          if (assign_neumann[i]) {
-              // If Neumann boundary is assigned here, update phi
-              phi[i] = ls_solution[i];
+          if (assign_dirichlet[i])      
+            phi_n[i] = ls_solution[idx++];
+          else if (assign_neumann[i])     
+            phi[i] = ls_solution[idx++];
+          else      /* Robin */
+          {
+              phi[i]   = ls_solution[idx++];
+              phi_n[i] = g[i] - beta[i]*phi[i];   // q = g - βφ
           }
       }
 
@@ -1063,33 +1043,24 @@ namespace Step34
   template <int dim>
   void BEMProblem<dim>::find_mesh_size()
   {
-    double mesh_size = 0.0;
+    double accumulated_size = 0.0;
+    unsigned int n_cells     = 0;
 
-    // Loop over all active cells in the boundary (codim=1) triangulation
     for (const auto &cell : dof_handler.active_cell_iterators())
-      {
-        // Assert that each cell is a quadrilateral with 4 vertices
-        Assert(cell->n_vertices() == 4, ExcNotImplemented());
+    {
+      Assert(cell->n_vertices() == 4, ExcNotImplemented());
 
-        const Point<dim> v0 = cell->vertex(0);
-        const Point<dim> v1 = cell->vertex(1);
-        const Point<dim> v2 = cell->vertex(2);
-        const Point<dim> v3 = cell->vertex(3);
+      const double diag1 = (cell->vertex(2) - cell->vertex(0)).norm();
+      const double diag2 = (cell->vertex(3) - cell->vertex(1)).norm();
 
-        // Compute length of the two diagonals
-        const double diag1 = (v2 - v0).norm(); // diagonal from v0 to v2
-        const double diag2 = (v3 - v1).norm(); // diagonal from v1 to v3
+      accumulated_size += std::max(diag1, diag2);
+      ++n_cells;
+    }
 
-        // Cell size is the larger of the two diagonals
-        const double cell_size = std::max(diag1, diag2);
+    // Guard against an empty triangulation
+    Assert(n_cells > 0, ExcMessage("No active cells in boundary mesh."));
 
-        // Update mesh_size if this cell is larger than the current max
-        if (cell_size > mesh_size)
-          mesh_size = cell_size;
-      }
-
-    // store mesh_size in a class variable:
-    this->mesh_size = mesh_size;
+    this->mesh_size = accumulated_size / static_cast<double>(n_cells);
   }
 
 
@@ -1495,7 +1466,7 @@ namespace Step34
   }
   */
 
-    
+  /* 
   template <int dim>
   void BEMProblem<dim>::compute_exterior_solution()
   {
@@ -1570,7 +1541,7 @@ namespace Step34
         {
           external_phi(i) += temp_quadrature_value;
         }
-        /*
+        
         if(is_exterior)
         {
           if(exterior_integration_domain)
@@ -1592,10 +1563,11 @@ namespace Step34
             external_phi(i) = temp_quadrature_value;
           }
         }
-        */
+        
         
       }
     }
+  
 
     // Use a DataOut object that is compatible with a (dim-1)-dimensional DoFHandler
     DataOut<dim-1, dim> data_out;
@@ -1607,7 +1579,7 @@ namespace Step34
     std::ofstream file(filename);
     data_out.write_vtk(file);
   }
-
+  */
   
 
   // @sect4{BEMProblem::output_results}
@@ -1637,6 +1609,8 @@ namespace Step34
     dataout.add_data_vector(alpha,
                             "alpha",
                             DataOut<dim - 1, dim>::type_dof_data);
+    dataout.add_data_vector(beta, "beta", DataOut<dim - 1, dim>::type_dof_data);
+    dataout.add_data_vector(g, "g", DataOut<dim - 1, dim>::type_dof_data); 
     dataout.add_data_vector(boundary_type, "boundary_type", DataOut<dim - 1, dim>::type_dof_data);
     dataout.add_data_vector(phi_exact, "phi_exact", DataOut<dim - 1, dim>::type_dof_data);
     dataout.add_data_vector(phi_n_exact, "phi_n_exact", DataOut<dim - 1, dim>::type_dof_data);
@@ -1665,15 +1639,15 @@ namespace Step34
         convergence_table.set_scientific("Linfty(alpha)", true);
 
         convergence_table.evaluate_convergence_rates(
-          "L2(phi)", ConvergenceTable::reduction_rate_log2);
+          "L2(phi)", ConvergenceTable::reduction_rate);
         convergence_table.evaluate_convergence_rates(
-          "Linfty(phi)", ConvergenceTable::reduction_rate_log2);
+          "Linfty(phi)", ConvergenceTable::reduction_rate);
         convergence_table.evaluate_convergence_rates(
-          "L2(phi_n)", ConvergenceTable::reduction_rate_log2);
+          "L2(phi_n)", ConvergenceTable::reduction_rate);
         convergence_table.evaluate_convergence_rates(
-          "Linfty(phi_n)", ConvergenceTable::reduction_rate_log2);
+          "Linfty(phi_n)", ConvergenceTable::reduction_rate);
         convergence_table.evaluate_convergence_rates(
-          "Linfty(alpha)", ConvergenceTable::reduction_rate_log2);
+          "Linfty(alpha)", ConvergenceTable::reduction_rate);
         deallog << std::endl;
 
         convergence_table.write_text(std::cout);
@@ -1698,6 +1672,8 @@ namespace Step34
     G.reinit(0, 0);
     system_rhs.reinit(0);
 
+    H_Laplace.reinit(0, 0);
+
     phi.reinit(0);
     phi_n.reinit(0);
     alpha.reinit(0);
@@ -1720,18 +1696,11 @@ namespace Step34
   {
     read_parameters(parameters_filename);
 
-    if (run_in_this_dimension == false)
-      {
-        deallog << "Run in dimension " << dim
-                << " explicitly disabled in parameter file. " << std::endl;
-        return;
-      }
-
     for (unsigned int cycle = 0; cycle < mesh_filenames.size(); ++cycle)
       {
         deallog << "Using mesh file: " << mesh_filenames[cycle] << std::endl;
         read_mesh(mesh_filenames[cycle]);
-        refine_and_resize();
+        init_structures();
         set_boundary_flags();
         assemble_system();
         recombine_matrices();
@@ -1743,8 +1712,8 @@ namespace Step34
         release_memory();
       }
 
-    if (extend_solution == true)
-      compute_exterior_solution();
+    //if (extend_solution == true)
+      // compute_exterior_solution();
   }
 } // namespace Step34
 

@@ -103,7 +103,7 @@ def main():
     plt.rc('ytick', labelsize=6)
 
     # Plot our data
-    plt.plot(meshsize, norm_l2phi,   "o-", label="L2(phi) normalized")
+    plt.plot(meshsize, norm_l2phi,   "o-", label="L2(phi) normalized")       # COMMENT THIS LINE TO NOT PLOT L2(phi)
     plt.plot(meshsize, norm_l2phin,  "s-", label="L2(phi_n) normalized")
 
     # X axis in log scale with decimal formatting
