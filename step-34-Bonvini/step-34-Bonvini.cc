@@ -29,6 +29,7 @@
 #include <deal.II/base/parsed_function.h>
 #include <deal.II/base/utilities.h>
 
+
 #include <deal.II/lac/full_matrix.h>
 #include <deal.II/lac/vector.h>
 #include <deal.II/lac/solver_control.h>
@@ -58,6 +59,9 @@
 #include <fstream>
 #include <string>
 #include <filesystem>
+#include <map>
+#include <functional>
+
 
 // The last part of this preamble is to import everything in the dealii
 // namespace into the one into which everything in this program will go:
@@ -74,6 +78,7 @@ namespace Step34
   // double layer potential kernels, that is $G$ and $\nabla G$. They are well
   // defined only if the vector $R = \mathbf{y}-\mathbf{x}$ is different from
   // zero.
+  /*
   namespace Kernel
   {
     inline double kappa = 0.0;
@@ -100,27 +105,10 @@ namespace Step34
       }
     }
   }
+  */
 
   namespace LaplaceKernel // ONLY FOR SOLID ANGLE ALPHA COMPUTATION
   {
-    template <int dim>
-    double single_layer(const Tensor<1, dim> &R)
-    {
-      switch (dim)
-        {
-          case 2:
-            return (-std::log(R.norm()) / (2 * numbers::PI));
-
-          case 3:
-            return (1. / (R.norm() * 4 * numbers::PI));
-
-          default:
-            DEAL_II_NOT_IMPLEMENTED();
-        }
-    }
-
-
-
     template <int dim>
     Tensor<1, dim> double_layer(const Tensor<1, dim> &R)
     {
@@ -279,7 +267,7 @@ namespace Step34
     MappingQ<dim - 1, dim>      mapping;
     std::vector<std::string> mesh_filenames;
 
-    double kappa; // Yukawa parameter
+    // double kappa; // Yukawa parameter
 
     // In BEM methods, the matrix that is generated is dense. Depending on the
     // size of the problem, the final system might be solved by direct LU
@@ -353,6 +341,16 @@ namespace Step34
 
     Functions::ParsedFunction<dim> region_function; 
 
+    Functions::ParsedFunction<dim> single_layer_function; // G
+    Functions::ParsedFunction<dim> double_layer_function; // ∇G
+
+    // Helpers for the kernel functions
+    double single_layer(const Tensor<1,dim> &R) const;
+    Tensor<1,dim> double_layer(const Tensor<1,dim> &R) const;
+
+    // Name of the singular quadrature rule the user picks
+    std::string singular_quadrature_type;
+
     unsigned int                         singular_quadrature_order;
     std::shared_ptr<Quadrature<dim - 1>> quadrature;
 
@@ -384,9 +382,35 @@ namespace Step34
     : fe(fe_degree)  
     , dof_handler(tria)
     , mapping(mapping_degree)
+    , double_layer_function(dim)
     , singular_quadrature_order(5)
     , parameters_filename(parameters_filename)
   {}
+
+  template <int dim>
+  double BEMProblem<dim>::single_layer(const Tensor<1,dim> &R) const
+  {
+    Point<dim> p;
+    for (unsigned d = 0; d < dim; ++d)
+      p[d] = R[d];
+    // n_components==1 ⇒ component defaults to 0
+    return single_layer_function.value(p);
+  }
+
+  template <int dim>
+  Tensor<1,dim> BEMProblem<dim>::double_layer(const Tensor<1,dim> &R) const
+  {
+    Point<dim> p;
+    for (unsigned d = 0; d < dim; ++d)
+      p[d] = R[d];
+
+    Tensor<1,dim> result;
+    for (unsigned c = 0; c < dim; ++c)
+      result[c] = double_layer_function.value(p, c);
+
+    return result;
+  }
+
 
   // The read_parameters() function is the one that reads the parameter file
   template <int dim>
@@ -400,9 +424,17 @@ namespace Step34
 
     // 1) Global options
     prm.declare_entry("Mesh filenames",         "cubed_sphere.msh", Patterns::Anything());
-    prm.declare_entry("Yukawa kappa", "0.0", Patterns::Double());
+    //prm.declare_entry("Yukawa kappa", "0.0", Patterns::Double());
     prm.declare_entry("Exterior domain",           "false", Patterns::Bool());
     prm.declare_entry("Infinity Dirichlet value",  "0.0",   Patterns::Double());
+
+    prm.enter_subsection("Single layer function");
+      Functions::ParsedFunction<dim>::declare_parameters(prm);       // 1 component (scalar)
+    prm.leave_subsection();
+
+    prm.enter_subsection("Double layer function");
+      Functions::ParsedFunction<dim>::declare_parameters(prm, dim);     // 'dim' components (vector)
+    prm.leave_subsection();
 
     // 2) Exact solution (optional)
     prm.enter_subsection("Exact solution phi 3d");
@@ -418,6 +450,8 @@ namespace Step34
       prm.declare_entry("Quadrature type",            "gauss",
         Patterns::Selection(QuadratureSelector<2>::get_quadrature_names()));
       prm.declare_entry("Quadrature order",           "4",    Patterns::Integer());
+      prm.declare_entry("Singular quadrature type",  "one_over_r",
+        Patterns::Anything());
       prm.declare_entry("Singular quadrature order",  "5",    Patterns::Integer());
     prm.leave_subsection();
 
@@ -453,12 +487,22 @@ namespace Step34
 
     // Store global values
     mesh_filenames              = Utilities::split_string_list(prm.get("Mesh filenames"), ' ');
-    kappa                       = prm.get_double("Yukawa kappa");
-    Kernel::kappa = kappa;
+    // kappa                       = prm.get_double("Yukawa kappa");
+    // Kernel::kappa = kappa;
     exterior_integration_domain = prm.get_bool("Exterior domain");
     phi_at_infinity             = prm.get_double("Infinity Dirichlet value");
     // external_refinement         = prm.get_integer("External refinement");
     // run_in_this_dimension       = prm.get_bool("Run 3d simulation");
+
+    // --- Read single‐layer kernel parameters ---
+    prm.enter_subsection("Single layer function");
+      single_layer_function.parse_parameters(prm);
+    prm.leave_subsection();
+
+    // --- Read double‐layer kernel parameters ---
+    prm.enter_subsection("Double layer function");
+      double_layer_function.parse_parameters(prm);
+    prm.leave_subsection();
 
     // Re-enter quadrature rules
     prm.enter_subsection("Quadrature rules");
@@ -466,6 +510,7 @@ namespace Step34
         QuadratureSelector<2>(
           prm.get("Quadrature type"),
           prm.get_integer("Quadrature order")));
+      singular_quadrature_type  = prm.get("Singular quadrature type");
       singular_quadrature_order = prm.get_integer("Singular quadrature order");
     prm.leave_subsection();
 
@@ -811,10 +856,10 @@ namespace Step34
                     for (unsigned int j = 0; j < fe.n_dofs_per_cell(); ++j)
                      {
                         local_H_row_i(j) +=
-                          ((Kernel::double_layer(R) * normals[q]) *
+                          ((double_layer(R) * normals[q]) *
                           fe_v.shape_value(j, q) * fe_v.JxW(q));
                         local_G_row_i(j) +=
-                          ((Kernel::single_layer(R)) *
+                          ((single_layer(R)) *
                           fe_v.shape_value(j, q) * fe_v.JxW(q));
 
                         local_H_Laplace_row_i(j) +=
@@ -876,12 +921,12 @@ namespace Step34
                     for (unsigned int j = 0; j < fe.n_dofs_per_cell(); ++j)
                       {
                           local_H_row_i(j) +=
-                            ((Kernel::double_layer(R) *
+                            ((double_layer(R) *
                               singular_normals[q]) *
                             fe_v_singular.shape_value(j, q) *
                             fe_v_singular.JxW(q));
                           local_G_row_i(j) += 
-                            ((Kernel::single_layer(R)) *
+                            ((single_layer(R)) *
                             fe_v_singular.shape_value(j, q) *
                             fe_v_singular.JxW(q));
 
@@ -1271,6 +1316,7 @@ namespace Step34
   // as an argument is the index of the unit support point where the
   // singularity is located.
 
+/*
   template <>
   Quadrature<2> BEMProblem<3>::get_singular_quadrature(
     const DoFHandler<2, 3>::active_cell_iterator &,
@@ -1302,6 +1348,76 @@ namespace Step34
                          1. / cell->measure(),
                          true);
   }
+*/
+
+
+  template <>
+  Quadrature<2>
+  BEMProblem<3>::get_singular_quadrature(
+    const typename DoFHandler<2,3>::active_cell_iterator &cell,
+    unsigned int                                              index) const
+  {
+    // 1) Define builder type and map (static so it’s initialized once)
+    using SQBuilder =
+      std::function<Quadrature<2>(unsigned int,       // order
+                                const Point<2>&,    // support point
+                                double,             // scale 
+                                bool)>;             // symmetric?
+
+    static const std::map<std::string, SQBuilder> builder_map = {
+      { "one_over_r", [](auto order, const auto &pt, auto, auto sym) {
+          return QGaussOneOverR<2>(order, pt, sym);
+        }
+      },
+      // Telles’ transformation rule (maps base Gauss to singular point) :contentReference[oaicite:0]{index=0}
+      { "telles", [](auto order, const auto &pt, auto, auto) {
+          return QTelles<2>(order, pt);
+        }
+      },
+      // Duffy transformation (collapses square to triangle) :contentReference[oaicite:1]{index=1}
+      { "duffy", [](auto order, const auto &, auto, auto) {
+          return QDuffy(order, 1.0);
+        }
+      },
+      // Polar‐coordinate rule on triangle :contentReference[oaicite:2]{index=2}
+      { "triangle_polar", [](auto order, const auto &, auto, auto) {
+          return QTrianglePolar(order);
+        }
+      }
+      // add here more entries here if you implement other 2D singular rules
+      // see https://dealii.org/current/doxygen/deal.II/quadrature__lib_8h.html for full list
+    };
+
+
+    // 2) Prepare scale and support points
+    const double scale           = 1.0 / cell->measure();
+    const auto &support_points   = fe.get_unit_support_points();
+
+    // 3) Look up the user’s choice
+    auto it = builder_map.find(singular_quadrature_type);
+    AssertThrow(it != builder_map.end(),
+                ExcMessage("Unknown singular quadrature type: "
+                          + singular_quadrature_type));
+    const auto &builder = it->second;
+
+    // 4) Build & cache one Quadrature per support point
+    static std::vector<Quadrature<2>> quadratures;
+    if (quadratures.empty())
+    {
+      quadratures.reserve(fe.n_dofs_per_cell());
+      for (unsigned int i = 0; i < fe.n_dofs_per_cell(); ++i)
+        quadratures.push_back(
+          builder(singular_quadrature_order, // order
+                  support_points[i],         // point
+                  scale,                     // scale
+                  true));                    // symmetric?
+    }
+
+    // 5) Return the requested quadrature
+    return quadratures[index];
+  }
+
+
 
 
 
@@ -1773,3 +1889,4 @@ int main()
 
   return 0;
 }
+

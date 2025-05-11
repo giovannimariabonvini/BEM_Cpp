@@ -1,31 +1,44 @@
-# BEM_Cpp
-C++ library for 3D Boundary Element Method.
+# 3D BEM Solver (step-34-Bonvini)
 
-This C++ script is used to solve the Laplace equation with collocation Boundary Element Method (BEM). 
-The equation it solves and the problem formulation are widely discussed in the project report that you can find in the GitHub repository.
-To properly compile the script you should install the finite element library deal.II in version 9.6.0. Its installation and use are well documented in their official website (https://www.dealii.org/). 
+This repository implements a collocation Boundary Element Method solver for the 3D Laplace/Yukawa equation, extended from the deal.II **step-34** tutorial. It supports mixed Dirichlet–Neumann–Robin boundary conditions, arbitrary surface meshes, and both Laplace and Yukawa kernels. 
 
-To run the simulation you should run the following commands from the terminal:
-cmake .
-make run
+---
 
-The parameters to specify the boundary conditions, mesh, convergence and linear solvers are passed to the code with a file called parameters.prm. The file contains comment to help the user specify the data of the.
+## Dependencies
 
-Helper python files are present in the repository and can be used for the following purposes:
-_mesh_gen.py files -> produce the appropriate mesh for the problem (sphere,torus,cube)
-check_normals.py -> produce an output_normals.vtk file that contains a set of points. Visualize this file along with the mesh file in Paraview and if the points lie outside the mesh then the normals have the correct directions.
+- **deal.II 9.6.0** or later 
+  - must be configured with **muParser** support 
+  - installation guide: https://dealii.org/current/readme.html 
+- **CMake ≥ 3.13.4** 
+- A C++17–capable compiler 
 
-MESH REQUIREMENTS
-If a user want to adopt a new geometry he must produce a mesh file with the following constraints:
-1) only .msh and .vtk files are accepted;
-2) all elements must be quads of 1st order (each element is formed by 4 points connected with 4 segments);
-3) the normals to every element must be pointing outward with respect to the mesh interior so every surface be oriented accordingly (check_normals.py can be used to check the actual normal directions);
+---
 
-The test case 1 of the project report can be performed as follows:
-1) leave the parameters.prm file as present in the GitHub repository.
-2) form terminal: cmake .
-3) from terminal: make run
-4) 3d_boundary_solution_0.vtk 3d_boundary_solution_1.vtk 3d_boundary_solution_2.vtk files are produced and can be visualized in Paraview
-5) a convergence_table.txt file is also produced
-6) from terminal: python3 plot_convergence.py
-This will produce two .png images with the L2 and Linf convergence rates for the problem
+## Installing deal.II
+git clone https://github.com/dealii/dealii.git
+cd dealii
+mkdir build && cd build
+cmake \
+  -DDEAL_II_WITH_MUPARSER=ON \
+  -DDEAL_II_WITH_PETSC=ON \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX=~/dealii-install 
+  .. 
+make -j$(nproc) install 
+make test 
+
+## Run a test case
+First clone the repository with:
+
+git clone https://github.com/giovannimariabonvini/BEM_Cpp.git 
+
+Then to run a test case:
+
+cd BEM_Cpp/step-34-Bonvini 
+cmake . 
+make run 
+
+The test case will be the one specified by the BEM_Cpp/step-34-Bonvini/parameter.prm file. This test case coincide with Test case 1 (explained in the report, also available in the repository)
+To run other test cases copy and paste the content of parameter.prm file contained in the folders "multi_spheres_benchmark" or "screened_Poisson_sphere_benchmark" in the file BEM_Cpp/step-34-Bonvini/parameter.prm the compile and run with make run.
+
+

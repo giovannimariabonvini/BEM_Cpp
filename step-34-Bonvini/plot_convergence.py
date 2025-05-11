@@ -129,9 +129,9 @@ def main():
                 linestyle=linestyles[i],
                 label=f"Order {p}")
 
-    plt.xlabel("Normalized mesh size (h/h0)")
+    plt.xlabel("Mesh size")
     plt.ylabel("Normalized L2 error")
-    plt.title("Convergence: L2 errors vs. mesh size (normalized)")
+    plt.title("Convergence: L2 errors vs. mesh size")
     plt.legend()
     plt.grid(True, which="both", ls=":")
     plt.tight_layout()
@@ -170,9 +170,9 @@ def main():
                 linestyle=linestyles[i],
                 label=f"Order {p}")
 
-    plt.xlabel("Normalized mesh size (h/h0)")
+    plt.xlabel("Mesh size")
     plt.ylabel("Normalized Linfty error")
-    plt.title("Convergence: Linfty errors vs. mesh size (normalized)")
+    plt.title("Convergence: Linfty errors vs. mesh size")
     plt.legend()
     plt.grid(True, which="both", ls=":")
     plt.tight_layout()

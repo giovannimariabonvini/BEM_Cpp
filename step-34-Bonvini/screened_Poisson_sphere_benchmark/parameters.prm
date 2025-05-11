@@ -30,6 +30,7 @@ end
 subsection Quadrature rules
   set Quadrature type           = gauss
   set Quadrature order          = 4
+  set Singular quadrature type  = one_over_r   # one_over_r, telles, duffy, triangle_polar
   set Singular quadrature order = 5
 end
 

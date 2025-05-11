@@ -10,7 +10,7 @@ def corner_string(corners):
 gmsh.initialize()
 gmsh.model.add("cube")
 
-mesh_size = 0.125  # target mesh size
+mesh_size = 0.17  # target mesh size
 
 lc = 1.0  # characteristic length - Dont change this value
 
@@ -168,7 +168,7 @@ while i < len(lines):
         i += 1
 
 # Write the reassembled file.
-with open("cubed_sphere_5.msh", "w") as f:
+with open("cubed_sphere_8.msh", "w") as f:
     f.writelines(output_lines)
 
 print("Postprocessed mesh written to 'cubed_sphere.msh'")

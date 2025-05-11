@@ -6,12 +6,22 @@
 # Mesh filename(s)
 set Mesh filenames                  =  lshape_mesh_1.msh # lshape_mesh_2.msh lshape_mesh_3.msh lshape_mesh_4.msh
 
-# Set kappa=0 for Laplace or kappa>0 for Yukawa equation (screened Poisson)
-set Yukawa kappa = 0
 
 # Domain type and far‐field value
 set Exterior domain                 = false
 set Infinity Dirichlet value        = 0.0
+
+subsection Single layer function
+  set Variable names   = x,y,z
+  set Function constants = 
+  set Function expression  = 1.0/(4*pi*sqrt(x*x+y*y+z*z))                                                    
+end
+
+subsection Double layer function
+  set Variable names   = x,y,z
+  set Function constants =                  
+  set Function expression  = x/(-4*pi*pow(x*x + y*y + z*z,3./2));y/(-4*pi*pow(x*x + y*y + z*z,3./2));z/(-4*pi*pow(x*x + y*y + z*z,3./2))
+end
 
 # Exact solution (optional, used for error computation)
 subsection Exact solution phi 3d
@@ -30,6 +40,7 @@ end
 subsection Quadrature rules
   set Quadrature type           = gauss
   set Quadrature order          = 4
+  set Singular quadrature type  = one_over_r   # one_over_r, telles, duffy, triangle_polar
   set Singular quadrature order = 5
 end
 

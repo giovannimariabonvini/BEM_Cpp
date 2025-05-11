@@ -1,0 +1,86 @@
+# --------------------------------------------------------------------
+# BEMParameterFile.prm
+# Complete parameter file for 3D BEM with mixed Dirichlet/Neumann/Robin
+# --------------------------------------------------------------------
+
+# Mesh filename(s)
+set Mesh filenames                  =  cubed_sphere_1.msh cubed_sphere_2.msh cubed_sphere_3.msh # cubed_sphere_4.msh cubed_sphere_5.msh cubed_sphere_6.msh cubed_sphere_7.msh cubed_sphere_8.msh
+
+# Domain type and far‐field value
+set Exterior domain                 = true
+set Infinity Dirichlet value        = 0.0
+
+subsection Single layer function
+  set Variable names   = x,y,z
+  set Function constants = kappa=1.5
+  set Function expression  = exp(-kappa*sqrt(x*x+y*y+z*z))/(4*pi*sqrt(x*x+y*y+z*z))                                                    
+end
+
+subsection Double layer function
+  set Variable names   = x,y,z
+  set Function constants = kappa=1.5                    
+  set Function expression  = x*(1 + kappa*sqrt(x*x + y*y + z*z))*exp(-kappa*sqrt(x*x + y*y + z*z))/(-4*pi*pow(x*x + y*y + z*z,3./2));y*(1 + kappa*sqrt(x*x + y*y + z*z))*exp(-kappa*sqrt(x*x + y*y + z*z))/(-4*pi*pow(x*x + y*y + z*z,3./2));z*(1 + kappa*sqrt(x*x + y*y + z*z))*exp(-kappa*sqrt(x*x + y*y + z*z))/(-4*pi*pow(x*x + y*y + z*z,3./2))
+end
+
+# Exact solution (optional, used for error computation)
+subsection Exact solution phi 3d
+  set Variable names   = x,y,z
+  set Function constants = kappa=1.5
+  set Function expression = exp(-kappa*sqrt(x^2+y^2+z^2))/sqrt(x^2+y^2+z^2)
+end
+
+subsection Exact solution phi_n 3d
+  set Variable names   = x,y,z
+  set Function constants = kappa = 1.5
+  set Function expression = -(kappa*sqrt(x^2+y^2+z^2)+1)*exp(-kappa*sqrt(x^2+y^2+z^2))/((sqrt(x^2+y^2+z^2))^2)
+end
+
+# Quadrature rules
+subsection Quadrature rules
+  set Quadrature type           = gauss
+  set Quadrature order          = 4
+  set Singular quadrature type  = one_over_r   # one_over_r, telles, duffy, triangle_polar
+  set Singular quadrature order = 5
+end
+
+# Linear solver parameters
+subsection Solver
+  set Log frequency = 1
+  set Log history   = false
+  set Log result    = true
+  set Max steps     = 1000
+  set Tolerance     = 1.e-10
+end
+
+# Boundary‐region flag: 0 = Neumann, 1 = Dirichlet, 2 = Robin
+subsection Boundary regions
+  set Function expression = 2
+end
+
+# Dirichlet data on Γ_D
+subsection Dirichlet function 3d
+  set Variable names   = x,y,z
+  set Function constants = kappa = 1.5
+  set Function expression = exp(-kappa*(sqrt(x^2+y^2+z^2)-1.0))/(4*pi*sqrt(x^2+y^2+z^2))
+end
+
+# Neumann data on Γ_N
+subsection Neumann function 3d
+  set Variable names   = x,y,z
+  set Function constants = 
+  set Function expression = 0
+end
+
+# Robin β coefficient on Γ_R
+subsection Robin beta function 3d
+  set Variable names   = x,y,z
+  set Function constants = kappa=1.5
+  set Function expression = kappa
+end
+
+# Robin g right‐hand side on Γ_R
+subsection Robin g function 3d
+  set Variable names   = x,y,z
+  set Function constants = a=1.0, kappa=1.5
+  set Function expression = -exp(-kappa*a)/(a^2)
+end
