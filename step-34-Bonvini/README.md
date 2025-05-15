@@ -32,13 +32,17 @@ First clone the repository with:
 
 git clone https://github.com/giovannimariabonvini/BEM_Cpp.git 
 
-Then to run a test case:
+Then to run Test case 3 (in reduced form: only first 6 refinements):
 
 cd BEM_Cpp/step-34-Bonvini 
 cmake . 
 make run 
 
-The test case will be the one specified by the BEM_Cpp/step-34-Bonvini/parameter.prm file. This test case coincide with Test case 1 (explained in the report, also available in the repository)
-To run other test cases copy and paste the content of parameter.prm file contained in the folders "multi_spheres_benchmark" or "screened_Poisson_sphere_benchmark" in the file BEM_Cpp/step-34-Bonvini/parameter.prm the compile and run with make run.
+The test case will be the one specified by the BEM_Cpp/step-34-Bonvini/parameter.prm file. This test case coincide with Test case 3 (explained in the project report).
+To run other test cases copy and paste the  parameter.prm file and .msh files contained in the folders "Test case 1" or "Test case 2" in the main folder BEM_Cpp/step-34-Bonvini then compile and run with make run.
 
+To check convergence for Test case 3 do:
 
+python plot_convergence.py
+
+and then check the convergence in the 2 .png images that appear in the main folder.

@@ -1,8 +1,0 @@
-[
-{
-  "directory": "/home/gio/BEM_Cpp/step-34-Bonvini",
-  "command": "/usr/bin/c++ -DDEBUG -isystem /usr/local/include/deal.II/bundled -pedantic -Wall -Wextra -Wmissing-braces -Woverloaded-virtual -Wpointer-arith -Wsign-compare -Wsuggest-override -Wswitch -Wsynth -Wwrite-strings -Wno-placement-new -Wno-deprecated-declarations -Wno-literal-suffix -Wno-psabi -Wno-parentheses -Wno-unused-local-typedefs -fopenmp-simd -O0 -ggdb -Wa,--compress-debug-sections -o CMakeFiles/step-34-Bonvini.dir/step-34-Bonvini.cc.o -c /home/gio/BEM_Cpp/step-34-Bonvini/step-34-Bonvini.cc",
-  "file": "/home/gio/BEM_Cpp/step-34-Bonvini/step-34-Bonvini.cc",
-  "output": "CMakeFiles/step-34-Bonvini.dir/step-34-Bonvini.cc.o"
-}
-]
