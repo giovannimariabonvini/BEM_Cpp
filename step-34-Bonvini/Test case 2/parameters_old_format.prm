@@ -1,0 +1,93 @@
+# Listing of Parameters
+# ---------------------
+
+set Extend solution on the -2,2 box = false
+set External refinement             = 5
+set Run 2d simulation               = false
+set Run 3d simulation               = true
+set Mesh filenames = planetary_spheres_1.msh planetary_spheres_2.msh planetary_spheres_3.msh
+
+# when solving for the interior domain set Exterior domain to false and Infinity Dirichlet value to 0.0
+set Exterior domain = true
+set Infinity Dirichlet value = 0.0
+
+subsection Exact solution phi 3d
+  # Any constant used inside the function which is not a variable name.
+  set Function constants = 
+
+  # Separate vector valued expressions by ';' as ',' is used internally by the
+  # function parser.
+  set Function expression = if(sqrt(x^2+y^2)<3.5,5, if( sqrt((x-5*cos(2*pi/10))^2 + (y-5*sin(2*pi/10))^2) < 1.5 || sqrt((x-5*cos(6*pi/10))^2 + (y-5*sin(6*pi/10))^2) < 1.5 || sqrt((x-5*cos(10*pi/10))^2 + (y-5*sin(10*pi/10))^2) < 1.5 || sqrt((x-5*cos(14*pi/10))^2 + (y-5*sin(14*pi/10))^2) < 1.5 || sqrt((x-5*cos(18*pi/10))^2 + (y-5*sin(18*pi/10))^2) < 1.5, -5, 5))
+
+  # The name of the variables as they will be used in the function, separated
+  # by ','.
+  set Variable names = x,y,z,t
+end
+
+subsection Exact solution phi_n 3d
+  # Any constant used inside the function which is not a variable name.
+  set Function constants = 
+
+  # Separate vector valued expressions by ';' as ',' is used internally by the
+  # function parser.
+  set Function expression = x+y+z
+
+  # The name of the variables as they will be used in the function, separated
+  # by ','.
+  set Variable names = x,y,z,t
+end
+
+subsection Quadrature rules
+  set Quadrature order          = 4
+  set Quadrature type           = gauss
+  set Singular quadrature order = 5
+end
+
+subsection Solver
+  set Log frequency = 1
+  set Log history   = false
+  set Log result    = true
+  set Max steps     = 1000
+  set Tolerance     = 1.e-10
+end
+
+subsection Dirichlet function 3d
+  # Any constant used inside the function which is not a variable name.
+  set Function constants = 
+
+  # Separate vector valued expressions by ';' as ',' is used internally by the
+  # function parser.
+  set Function expression = if(sqrt(x^2+y^2)<3.5,5, if( sqrt((x-5*cos(2*pi/10))^2 + (y-5*sin(2*pi/10))^2) < 1.5 || sqrt((x-5*cos(6*pi/10))^2 + (y-5*sin(6*pi/10))^2) < 1.5 || sqrt((x-5*cos(10*pi/10))^2 + (y-5*sin(10*pi/10))^2) < 1.5 || sqrt((x-5*cos(14*pi/10))^2 + (y-5*sin(14*pi/10))^2) < 1.5 || sqrt((x-5*cos(18*pi/10))^2 + (y-5*sin(18*pi/10))^2) < 1.5, -5, 5))
+
+  # The name of the variables as they will be used in the function, separated
+  # by ','.
+  set Variable names = x,y,z,t
+end
+
+subsection Neumann function 3d
+  # Any constant used inside the function which is not a variable name.
+  set Function constants = 
+
+  # Separate vector valued expressions by ';' as ',' is used internally by the
+  # function parser.
+  set Function expression = x+y+z
+
+  # The name of the variables as they will be used in the function, separated
+  # by ','.
+  set Variable names = x,y,z,t
+end
+
+subsection Neumann region 3d
+  # Any constant used inside the function which is not a variable name.
+  set Function constants = 
+  
+  # The function expression has to be = 0 for the Neumann region and != 0 for Dirichlet region
+  # Set 1 for fully Dirichlet and 0 for fully Neumann problems or use if(condition,this,that) statement for mixed
+  set Function expression = 1
+
+  # The name of the variables as they will be used in the function, separated
+  # by ','.
+  set Variable names = x,y,z,t
+end
+
+
